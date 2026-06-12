@@ -29,6 +29,7 @@ export const CLIENT_ORIGINS = (process.env.CLIENT_ORIGINS ||
 export const COOKIE_NAME = "phone_cloud_token";
 export const TOKEN_TTL = process.env.JWT_EXPIRES_IN || "12h";
 export const COOKIE_SECURE = process.env.COOKIE_SECURE === "true";
+export const COOKIE_SAME_SITE = process.env.COOKIE_SAME_SITE || "Strict";
 export const STORAGE_TOTAL_BYTES = Number(process.env.TOTAL_STORAGE_BYTES || 0);
 
 export function assertRequiredEnv() {

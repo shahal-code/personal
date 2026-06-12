@@ -7,6 +7,7 @@ import {
   ADMIN_PASSWORD_HASH,
   COOKIE_NAME,
   COOKIE_SECURE,
+  COOKIE_SAME_SITE,
   JWT_SECRET,
   TOKEN_TTL,
 } from "../config/env.js";
@@ -39,7 +40,7 @@ function setAuthCookie(res, token, expiresAt) {
     `${COOKIE_NAME}=${encodeURIComponent(token)}`,
     "HttpOnly",
     "Path=/",
-    "SameSite=Strict",
+    `SameSite=${COOKIE_SAME_SITE}`,
     secureFlag ? "Secure" : null,
     expiresAt ? `Expires=${new Date(expiresAt * 1000).toUTCString()}` : null,
   ].filter(Boolean);
@@ -53,7 +54,7 @@ function clearAuthCookie(res) {
     `${COOKIE_NAME}=`,
     "HttpOnly",
     "Path=/",
-    "SameSite=Strict",
+    `SameSite=${COOKIE_SAME_SITE}`,
     "Max-Age=0",
     secureFlag ? "Secure" : null,
   ].filter(Boolean);

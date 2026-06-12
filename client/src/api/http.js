@@ -5,6 +5,20 @@ function normalizeError(message, status, details) {
   return error;
 }
 
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
+
+function buildUrl(path) {
+  if (/^https?:\/\//i.test(path)) {
+    return path;
+  }
+
+  if (!API_BASE_URL) {
+    return path;
+  }
+
+  return `${API_BASE_URL}${path}`;
+}
+
 export async function request(path, options = {}) {
   const { method = "GET", body, headers = {}, signal } = options;
   const init = {
@@ -23,7 +37,7 @@ export async function request(path, options = {}) {
     init.body = JSON.stringify(body);
   }
 
-  const response = await fetch(path, init);
+  const response = await fetch(buildUrl(path), init);
   const contentType = response.headers.get("content-type") || "";
   const payload = contentType.includes("application/json")
     ? await response.json().catch(() => ({}))
