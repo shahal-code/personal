@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import { Router } from "express";
 import {
   ADMIN_EMAIL,
+  ADMIN_PASSWORD,
   ADMIN_PASSWORD_HASH,
   COOKIE_NAME,
   COOKIE_SECURE,
@@ -85,7 +86,9 @@ router.post("/login", async (req, res) => {
     return res.status(401).json({ message: "Invalid credentials." });
   }
 
-  const passwordMatches = await bcrypt.compare(password, ADMIN_PASSWORD_HASH);
+  const passwordMatches = ADMIN_PASSWORD
+    ? password === ADMIN_PASSWORD
+    : await bcrypt.compare(password, ADMIN_PASSWORD_HASH);
   if (!passwordMatches) {
     bucket.count += 1;
     return res.status(401).json({ message: "Invalid credentials." });

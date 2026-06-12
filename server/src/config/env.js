@@ -16,6 +16,7 @@ export const STORAGE_ROOT = path.resolve(
 );
 
 export const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "";
+export const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
 export const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH || "";
 export const JWT_SECRET = process.env.JWT_SECRET || "";
 
@@ -36,7 +37,9 @@ export function assertRequiredEnv() {
   const missing = [];
 
   if (!ADMIN_EMAIL) missing.push("ADMIN_EMAIL");
-  if (!ADMIN_PASSWORD_HASH) missing.push("ADMIN_PASSWORD_HASH");
+  if (!ADMIN_PASSWORD && !ADMIN_PASSWORD_HASH) {
+    missing.push("ADMIN_PASSWORD or ADMIN_PASSWORD_HASH");
+  }
   if (!JWT_SECRET) missing.push("JWT_SECRET");
 
   if (missing.length > 0) {
