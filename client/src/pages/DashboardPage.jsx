@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { request, formatBytes, formatDate } from "../api/http.js";
+import { download, request, formatBytes, formatDate } from "../api/http.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import StoragePanel from "../components/StoragePanel.jsx";
 import Modal from "../components/Modal.jsx";
@@ -309,9 +309,7 @@ export default function DashboardPage() {
                       setRenameValue(item.name);
                     }}
                     onDelete={() => handleDelete(item)}
-                    onDownload={() => {
-                      window.location.href = `/download?path=${encodeURIComponent(item.path)}`;
-                    }}
+                    onDownload={() => download(`/download?path=${encodeURIComponent(item.path)}`, item.name)}
                   />
                 </article>
               ))}

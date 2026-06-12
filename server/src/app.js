@@ -29,6 +29,7 @@ export async function createApp() {
   );
   app.use(
     cors({
+      exposedHeaders: ["Content-Disposition"],
       origin(origin, callback) {
         if (!origin) {
           return callback(null, true);
