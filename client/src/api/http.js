@@ -147,6 +147,7 @@ function buildQueryString(params) {
 
 function sendChunk(path, blob, options = {}) {
   const { headers = {}, signal, onProgress, query = {} } = options;
+  let lastProgressUpdate = 0;
 
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -178,11 +179,15 @@ function sendChunk(path, blob, options = {}) {
 
     xhr.upload.onprogress = (event) => {
       if (typeof onProgress === "function" && event.lengthComputable) {
-        onProgress({
-          loaded: event.loaded,
-          total: event.total,
-          progress: event.total > 0 ? event.loaded / event.total : 0,
-        });
+        const now = Date.now();
+        if (now - lastProgressUpdate >= 100 || event.loaded === event.total) {
+          lastProgressUpdate = now;
+          onProgress({
+            loaded: event.loaded,
+            total: event.total,
+            progress: event.total > 0 ? event.loaded / event.total : 0,
+          });
+        }
       }
     };
 
@@ -222,6 +227,7 @@ function sendChunk(path, blob, options = {}) {
 
 function sendStream(path, blob, options = {}) {
   const { headers = {}, signal, onProgress, query = {} } = options;
+  let lastProgressUpdate = 0;
 
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -253,11 +259,15 @@ function sendStream(path, blob, options = {}) {
 
     xhr.upload.onprogress = (event) => {
       if (typeof onProgress === "function" && event.lengthComputable) {
-        onProgress({
-          loaded: event.loaded,
-          total: event.total,
-          progress: event.total > 0 ? event.loaded / event.total : 0,
-        });
+        const now = Date.now();
+        if (now - lastProgressUpdate >= 100 || event.loaded === event.total) {
+          lastProgressUpdate = now;
+          onProgress({
+            loaded: event.loaded,
+            total: event.total,
+            progress: event.total > 0 ? event.loaded / event.total : 0,
+          });
+        }
       }
     };
 
@@ -356,19 +366,21 @@ export async function uploadFiles(path, options = {}) {
         });
         lastError = null;
         break;
-      } catch (error) {
-        lastError = error;
+    } catch (error) {
+      lastError = error;
 
+      if (!fastUpload) {
         const verified = await verifyUploadedFile(targetPath, file.name, file.size);
         if (verified) {
           payload = verified;
           lastError = null;
           break;
         }
+      }
 
-        if (!isRetryableUploadError(error) || attempt >= maxRetries) {
-          throw error;
-        }
+      if (!isRetryableUploadError(error) || attempt >= maxRetries) {
+        throw error;
+      }
 
         await delay(500 * (attempt + 1));
       }
