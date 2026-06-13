@@ -440,6 +440,11 @@ h2 {
   font-weight: 700;
 }
 
+.upload-panel__copy {
+  margin: 0 0 10px;
+  color: var(--muted);
+}
+
 .file-table {
   display: grid;
   gap: 8px;

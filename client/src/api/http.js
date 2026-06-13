@@ -19,6 +19,10 @@ function buildUrl(path) {
   return `${API_BASE_URL}${path}`;
 }
 
+export function resolveUrl(path) {
+  return buildUrl(path);
+}
+
 function getDownloadName(response, fallbackName) {
   const contentDisposition = response.headers.get("content-disposition") || "";
   const match = contentDisposition.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);

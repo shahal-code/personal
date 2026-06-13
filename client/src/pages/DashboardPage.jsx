@@ -6,6 +6,33 @@ import StoragePanel from "../components/StoragePanel.jsx";
 import Modal from "../components/Modal.jsx";
 import FilePreviewModal from "../components/FilePreviewModal.jsx";
 
+const UPLOAD_SESSION_KEY = "phonecloud.uploadSession";
+
+function readUploadSession() {
+  try {
+    const raw = window.sessionStorage.getItem(UPLOAD_SESSION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeUploadSession(payload) {
+  try {
+    window.sessionStorage.setItem(UPLOAD_SESSION_KEY, JSON.stringify(payload));
+  } catch {
+    // Ignore storage errors.
+  }
+}
+
+function clearUploadSession() {
+  try {
+    window.sessionStorage.removeItem(UPLOAD_SESSION_KEY);
+  } catch {
+    // Ignore storage errors.
+  }
+}
+
 function humanFileType(item) {
   if (item.type === "folder") {
     return "Folder";
@@ -68,6 +95,7 @@ export default function DashboardPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadFileName, setUploadFileName] = useState("");
+  const [restoredUpload, setRestoredUpload] = useState(null);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [renameTarget, setRenameTarget] = useState(null);
@@ -127,6 +155,44 @@ export default function DashboardPage() {
     return () => window.clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    const saved = readUploadSession();
+    if (saved && saved.uploading) {
+      setRestoredUpload(saved);
+      setUploadProgress(saved.progress || 0);
+      setUploadFileName(saved.fileName || "");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!uploading) {
+      return undefined;
+    }
+
+    const handleBeforeUnload = (event) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [uploading]);
+
+  useEffect(() => {
+    if (uploading || uploadProgress > 0) {
+      writeUploadSession({
+        uploading,
+        progress: uploadProgress,
+        fileName: uploadFileName,
+        path: directory.currentPath,
+        updatedAt: Date.now(),
+      });
+      return;
+    }
+
+    clearUploadSession();
+  }, [uploading, uploadProgress, uploadFileName, directory.currentPath]);
+
   async function handleUpload(event) {
     const files = Array.from(event.target.files || []);
     if (files.length === 0) {
@@ -136,6 +202,7 @@ export default function DashboardPage() {
     setUploading(true);
     setUploadProgress(0);
     setUploadFileName("");
+    setRestoredUpload(null);
     setError("");
     const formData = new FormData();
     formData.append("path", directory.currentPath === "/" ? "" : directory.currentPath.replace(/^\/+/, ""));
@@ -160,6 +227,7 @@ export default function DashboardPage() {
       setUploading(false);
       setUploadProgress(0);
       setUploadFileName("");
+      clearUploadSession();
       event.target.value = "";
     }
   }
@@ -305,6 +373,17 @@ export default function DashboardPage() {
             </div>
             <div className="progress-track">
               <div className="progress-fill progress-fill--upload" style={{ width: `${uploadProgress}%` }} />
+            </div>
+          </section>
+        ) : restoredUpload ? (
+          <section className="upload-panel" aria-live="polite">
+            <div className="upload-panel__header">
+              <span>{restoredUpload.fileName ? `Upload interrupted: ${restoredUpload.fileName}` : "Upload interrupted"}</span>
+              <strong>{restoredUpload.progress || 0}%</strong>
+            </div>
+            <p className="upload-panel__copy">Refresh stops the browser upload. Re-select the file to continue.</p>
+            <div className="progress-track">
+              <div className="progress-fill progress-fill--upload" style={{ width: `${restoredUpload.progress || 0}%` }} />
             </div>
           </section>
         ) : null}

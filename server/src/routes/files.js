@@ -31,6 +31,70 @@ async function cleanupChunkSession(sessionPath) {
   await fs.rm(sessionPath, { recursive: true, force: true }).catch(() => {});
 }
 
+async function readCursor(sessionPath) {
+  try {
+    const raw = await fs.readFile(path.join(sessionPath, ".cursor"), "utf8");
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isInteger(parsed) && parsed >= 0 ? parsed : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function writeCursor(sessionPath, cursor) {
+  await fs.writeFile(path.join(sessionPath, ".cursor"), String(cursor), "utf8");
+}
+
+async function ensureLiveFile(sessionPath) {
+  const livePath = path.join(sessionPath, ".live");
+  await fs.mkdir(path.dirname(livePath), { recursive: true });
+  return livePath;
+}
+
+async function writeSessionMeta(sessionPath, meta) {
+  await fs.writeFile(path.join(sessionPath, ".meta.json"), JSON.stringify(meta), "utf8");
+}
+
+async function readSessionMeta(sessionPath) {
+  try {
+    const raw = await fs.readFile(path.join(sessionPath, ".meta.json"), "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+async function flushContiguousChunks(sessionPath) {
+  const livePath = await ensureLiveFile(sessionPath);
+  let cursor = await readCursor(sessionPath);
+  const handle = await fs.open(livePath, "a");
+
+  try {
+    while (true) {
+      const chunkName = `${String(cursor).padStart(8, "0")}.part`;
+      const chunkPath = path.join(sessionPath, chunkName);
+
+      try {
+        const chunkBuffer = await fs.readFile(chunkPath);
+        await handle.write(chunkBuffer);
+        await fs.rm(chunkPath, { force: true });
+        cursor += 1;
+      } catch (error) {
+        if (error?.code === "ENOENT") {
+          break;
+        }
+
+        throw error;
+      }
+    }
+  } finally {
+    await handle.close();
+  }
+
+  await writeCursor(sessionPath, cursor);
+  return cursor;
+}
+
 async function tryFinalizeChunkSession(sessionPath, destinationAbsolute, totalChunks) {
   const lockPath = path.join(sessionPath, ".finalizing");
 
@@ -45,33 +109,42 @@ async function tryFinalizeChunkSession(sessionPath, destinationAbsolute, totalCh
   }
 
   try {
-    const entries = await fs.readdir(sessionPath, { withFileTypes: true });
-    const chunkFiles = entries
-      .filter((entry) => entry.isFile() && entry.name.endsWith(".part"))
-      .sort((left, right) => left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" }));
-
-    if (chunkFiles.length !== totalChunks) {
+    const cursor = await flushContiguousChunks(sessionPath);
+    if (cursor !== totalChunks) {
       return false;
     }
 
-    const assemblyPath = `${destinationAbsolute}.uploading`;
-    const handle = await fs.open(assemblyPath, "w");
-
-    try {
-      for (const chunkFile of chunkFiles) {
-        const chunkPath = path.join(sessionPath, chunkFile.name);
-        const chunkBuffer = await fs.readFile(chunkPath);
-        await handle.write(chunkBuffer);
-      }
-    } finally {
-      await handle.close();
-    }
-
-    await fs.rename(assemblyPath, destinationAbsolute);
+    const livePath = await ensureLiveFile(sessionPath);
+    await fs.rename(livePath, destinationAbsolute);
     await cleanupChunkSession(sessionPath);
     return true;
   } finally {
     await fs.rm(lockPath, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function getChunkSessionState(sessionPath) {
+  try {
+    const entries = await fs.readdir(sessionPath, { withFileTypes: true });
+    const chunkFiles = entries.filter((entry) => entry.isFile() && entry.name.endsWith(".part"));
+    const meta = await readSessionMeta(sessionPath);
+    return {
+      exists: true,
+      chunkCount: chunkFiles.length,
+      chunkIndexes: chunkFiles.map((entry) => Number.parseInt(entry.name, 10)).filter((value) => Number.isInteger(value)),
+      meta,
+    };
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return {
+        exists: false,
+        chunkCount: 0,
+        chunkIndexes: [],
+        meta: null,
+      };
+    }
+
+    throw error;
   }
 }
 
@@ -182,6 +255,14 @@ router.post("/upload/chunk", chunkUpload, async (req, res) => {
   const chunkFileName = `${String(chunkIndex).padStart(8, "0")}.part`;
   const chunkAbsolute = path.join(sessionPath, chunkFileName);
 
+  if (chunkIndex === 0) {
+    await writeSessionMeta(sessionPath, {
+      destinationRelative,
+      fileName,
+      totalChunks,
+    });
+  }
+
   if (await fileExists(STORAGE_ROOT, destinationRelative)) {
     await cleanupChunkSession(sessionPath);
     return res.status(409).json({ message: `File already exists: ${fileName}` });
@@ -207,6 +288,16 @@ router.post("/upload/chunk", chunkUpload, async (req, res) => {
     uploadId,
     chunkIndex,
   });
+});
+
+router.get("/upload/chunk/status", async (req, res) => {
+  await ensureRootReady();
+
+  const uploadId = ensureSafeName(req.query.uploadId || "");
+  const sessionPath = path.join(chunkSessionRoot, uploadId);
+  const state = await getChunkSessionState(sessionPath);
+
+  return res.json(state);
 });
 
 router.get("/download", async (req, res) => {
@@ -237,6 +328,48 @@ router.get("/preview", async (req, res) => {
       "Content-Disposition": `inline; filename="${path.basename(absolutePath)}"`,
     },
   });
+});
+
+router.get("/preview/live", async (req, res) => {
+  await ensureRootReady();
+  const relativePath = parseRelativePath(req.query.path || "");
+  const { absolutePath: finalPath } = resolveStoragePath(STORAGE_ROOT, relativePath);
+
+  const finalStats = await fs.stat(finalPath).catch(() => null);
+  if (finalStats?.isFile()) {
+    return res.sendFile(finalPath, {
+      headers: {
+        "Content-Disposition": `inline; filename="${path.basename(finalPath)}"`,
+      },
+    });
+  }
+
+  const sessions = await fs.readdir(chunkSessionRoot, { withFileTypes: true }).catch(() => []);
+  for (const entry of sessions) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+
+    const sessionPath = path.join(chunkSessionRoot, entry.name);
+    const meta = await readSessionMeta(sessionPath);
+    if (!meta || meta.destinationRelative !== relativePath) {
+      continue;
+    }
+
+    const livePath = path.join(sessionPath, ".live");
+    const liveStats = await fs.stat(livePath).catch(() => null);
+    if (!liveStats?.isFile()) {
+      continue;
+    }
+
+    return res.sendFile(livePath, {
+      headers: {
+        "Content-Disposition": `inline; filename="${path.basename(finalPath)}"`,
+      },
+    });
+  }
+
+  return res.status(404).json({ message: "Live preview unavailable" });
 });
 
 router.delete("/delete", async (req, res) => {
