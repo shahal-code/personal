@@ -129,6 +129,7 @@ export default function DashboardPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadFileName, setUploadFileName] = useState("");
   const [uploadPhase, setUploadPhase] = useState("");
+  const [uploadFileCount, setUploadFileCount] = useState(0);
   const [restoredUpload, setRestoredUpload] = useState(null);
   const [fastUploadMode, setFastUploadMode] = useState(true);
   const [message, setMessage] = useState("");
@@ -262,18 +263,18 @@ export default function DashboardPage() {
 
   async function handleUpload(event) {
     const files = Array.from(event.target.files || []);
-    if (files.length === 0) {
-      return;
-    }
+    if (files.length === 0) return;
 
     const uploadPath = directory.currentPath === "/" ? "" : directory.currentPath.replace(/^\/+/, "");
     setUploading(true);
     setUploadProgress(0);
-    setUploadFileName("");
+    setUploadFileCount(files.length);
+    setUploadFileName(files.length > 1 ? `${files.length} files selected` : files[0].name);
     setUploadPhase("Uploading");
     setRestoredUpload(null);
     setError("");
     uploadCompletionRef.current = false;
+
     const formData = new FormData();
     formData.append("path", uploadPath);
     files.forEach((file) => formData.append("files", file));
@@ -285,7 +286,11 @@ export default function DashboardPage() {
         onProgress: ({ progress, fileName }) => {
           setUploadProgress(Math.round(progress * 100));
           if (fileName) {
-            setUploadFileName(fileName);
+            setUploadFileName(
+              files.length > 1
+                ? `${fileName} (${Math.round(progress * 100)}% overall)`
+                : fileName
+            );
           }
           setUploadPhase(progress >= 1 ? "Saving" : "Uploading");
         },
@@ -295,11 +300,12 @@ export default function DashboardPage() {
         appendItems(result.uploaded);
       }
 
-      setUploading(false);
-      setUploadProgress(0);
-      setUploadFileName("");
-      setUploadPhase("");
-      setMessage(`${files.length} file${files.length > 1 ? "s" : ""} uploaded`);
+      setMessage(
+        files.length > 1
+          ? `${result?.uploaded?.length || files.length} files uploaded successfully`
+          : `${files[0].name} uploaded`
+      );
+
       void loadData(uploadPath);
       void loadSystemStatus();
     } catch (requestError) {
@@ -309,6 +315,7 @@ export default function DashboardPage() {
       setUploadProgress(0);
       setUploadFileName("");
       setUploadPhase("");
+      setUploadFileCount(0);
       uploadCompletionRef.current = false;
       clearUploadSession();
       event.target.value = "";
@@ -475,8 +482,17 @@ export default function DashboardPage() {
             >
               {fastUploadMode ? "Fast upload" : "Live preview"}
             </button>
-            <button className="primary-button" type="button" onClick={() => uploadRef.current?.click()} disabled={busy || uploading}>
-              Upload files
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => uploadRef.current?.click()}
+              disabled={busy || uploading}
+            >
+              {uploading
+                ? uploadFileCount > 1
+                  ? `Uploading ${uploadFileCount} files...`
+                  : "Uploading..."
+                : "Upload files"}
             </button>
             <input ref={uploadRef} className="hidden-input" type="file" multiple onChange={handleUpload} />
           </div>
@@ -489,18 +505,23 @@ export default function DashboardPage() {
             <div className="upload-panel__header">
               <span>
                 {uploadFileName
-                  ? `${uploadPhase || "Uploading"} ${uploadFileName}`
+                  ? `${uploadPhase || "Uploading"}: ${uploadFileName}`
                   : uploadPhase || "Uploading files"}
               </span>
               <strong>{uploadProgress}%</strong>
             </div>
             <p className="upload-panel__copy">
-              {fastUploadMode
-                ? "Fast upload mode is on. HLS/extra preview work is skipped until after upload."
-                : "Live preview mode is on. Upload may be slower because the server keeps preview support active."}
+              {uploadFileCount > 1
+                ? `Uploading ${uploadFileCount} files — ${fastUploadMode ? "fast upload mode on" : "live preview mode on"}`
+                : fastUploadMode
+                  ? "Fast upload mode is on. HLS/extra preview work is skipped until after upload."
+                  : "Live preview mode is on. Upload may be slower because the server keeps preview support active."}
             </p>
             <div className="progress-track">
-              <div className="progress-fill progress-fill--upload" style={{ width: `${uploadProgress}%` }} />
+              <div
+                className="progress-fill progress-fill--upload"
+                style={{ width: `${uploadProgress}%`, transition: "width 0.3s ease" }}
+              />
             </div>
           </section>
         ) : restoredUpload ? (
@@ -515,7 +536,10 @@ export default function DashboardPage() {
             </div>
             <p className="upload-panel__copy">Refresh stops the browser upload. Re-select the file to continue.</p>
             <div className="progress-track">
-              <div className="progress-fill progress-fill--upload" style={{ width: `${restoredUpload.progress || 0}%` }} />
+              <div
+                className="progress-fill progress-fill--upload"
+                style={{ width: `${restoredUpload.progress || 0}%` }}
+              />
             </div>
           </section>
         ) : null}
