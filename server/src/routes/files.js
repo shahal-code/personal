@@ -36,6 +36,24 @@ async function cleanupChunkSession(sessionPath) {
   await fs.rm(sessionPath, { recursive: true, force: true }).catch(() => {});
 }
 
+function getStreamUploadStatePath(uploadId) {
+  return path.join(streamUploadRoot, `${uploadId}.json`);
+}
+
+async function readStreamUploadState(uploadId) {
+  try {
+    const raw = await fs.readFile(getStreamUploadStatePath(uploadId), "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+async function writeStreamUploadState(uploadId, state) {
+  await fs.mkdir(streamUploadRoot, { recursive: true });
+  await fs.writeFile(getStreamUploadStatePath(uploadId), JSON.stringify(state, null, 2), "utf8");
+}
+
 async function moveFileSafe(sourcePath, destinationPath) {
   try {
     await fs.rename(sourcePath, destinationPath);
@@ -327,7 +345,7 @@ router.post("/upload/chunk", chunkUpload, async (req, res) => {
   });
 });
 
-router.post("/upload/stream", async (req, res, next) => {
+router.post("/upload/stream", async (req, res) => {
   await ensureRootReady();
 
   const targetPath = parseRelativePath(req.query.path || "");
@@ -336,6 +354,19 @@ router.post("/upload/stream", async (req, res, next) => {
   const destinationRelative = joinRelativePath(targetPath, fileName);
   const destinationAbsolute = resolveStoragePath(STORAGE_ROOT, destinationRelative).absolutePath;
   const tempPath = path.join(streamUploadRoot, `${uploadId}.partial`);
+  const statePath = getStreamUploadStatePath(uploadId);
+  const existingState = await readStreamUploadState(uploadId);
+
+  if (existingState?.destinationRelative === destinationRelative) {
+    const finalExists = await fileExists(STORAGE_ROOT, destinationRelative);
+    if (finalExists) {
+      const uploadedItem = await buildUploadedItem(destinationAbsolute, destinationRelative);
+      return res.status(200).json({
+        message: "Upload complete",
+        uploaded: [uploadedItem],
+      });
+    }
+  }
 
   if (await fileExists(STORAGE_ROOT, destinationRelative)) {
     return res.status(409).json({ message: `File already exists: ${fileName}` });
@@ -357,8 +388,20 @@ router.post("/upload/stream", async (req, res, next) => {
       }).catch(() => {});
     }
 
-    const uploadedItem = await buildUploadedItem(destinationAbsolute, destinationRelative);
+    await fs.writeFile(
+      statePath,
+      JSON.stringify(
+        {
+          destinationRelative,
+          completedAt: new Date().toISOString(),
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
 
+    const uploadedItem = await buildUploadedItem(destinationAbsolute, destinationRelative);
     return res.status(201).json({
       message: "Upload complete",
       uploaded: [uploadedItem],
@@ -375,7 +418,7 @@ router.post("/upload/stream", async (req, res, next) => {
   }
 });
 
-router.get("/upload/chunk/status", async (req, res) => {
+router.get("/upload/chunk/status"', async (req, res) => {
   await ensureRootReady();
 
   const uploadId = ensureSafeName(req.query.uploadId || "");
