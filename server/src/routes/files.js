@@ -403,6 +403,13 @@ router.post("/upload/stream", async (req, res) => {
   const statePath = getStreamUploadStatePath(uploadId);
   const existingState = await readStreamUploadState(uploadId);
 
+  console.info("Stream upload started", {
+    fileName,
+    destinationRelative,
+    uploadId,
+    expectedBytes: Number.isFinite(totalSize) ? totalSize : 0,
+  });
+
   const finalStats = await fs.stat(destinationAbsolute).catch(() => null);
   if (finalStats?.isFile()) {
     if (existingState?.destinationRelative === destinationRelative || (Number.isFinite(totalSize) && finalStats.size === totalSize)) {
@@ -446,6 +453,13 @@ router.post("/upload/stream", async (req, res) => {
     );
 
     const uploadedItem = await buildUploadedItem(destinationAbsolute, destinationRelative);
+    console.info("Stream upload complete", {
+      fileName,
+      destinationRelative,
+      uploadId,
+      size: uploadedItem.size,
+    });
+
     return res.status(201).json({
       message: "Upload complete",
       uploaded: [uploadedItem],

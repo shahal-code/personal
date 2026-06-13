@@ -6,9 +6,9 @@ function normalizeError(message, status, details) {
 }
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
-const CHUNK_SIZE = 16 * 1024 * 1024;
+const CHUNK_SIZE = 24 * 1024 * 1024;
 const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024;
-const FORCE_CHUNK_UPLOAD = import.meta.env.VITE_FORCE_CHUNK_UPLOAD === "true";
+const STREAM_LARGE_UPLOADS = import.meta.env.VITE_STREAM_LARGE_UPLOADS === "true";
 
 function buildUrl(path) {
   if (/^https?:\/\//i.test(path)) {
@@ -213,7 +213,7 @@ function sendChunk(path, blob, options = {}) {
     };
 
     xhr.onerror = () => {
-      reject(normalizeError("Upload failed", xhr.status || 0));
+      reject(normalizeError("Upload network error. The browser lost the connection before the server returned a response.", xhr.status || 0));
     };
 
     xhr.onabort = () => {
@@ -293,7 +293,7 @@ function sendStream(path, blob, options = {}) {
     };
 
     xhr.onerror = () => {
-      reject(normalizeError("Upload failed", xhr.status || 0));
+      reject(normalizeError("Upload network error. The browser lost the connection before the server returned a response.", xhr.status || 0));
     };
 
     xhr.onabort = () => {
@@ -411,7 +411,7 @@ export async function uploadFiles(path, options = {}) {
     let payload;
     let lastError = null;
     const maxRetries = 2;
-    const useChunkedUpload = FORCE_CHUNK_UPLOAD && file.size > LARGE_FILE_THRESHOLD;
+    const useChunkedUpload = file.size > LARGE_FILE_THRESHOLD && !STREAM_LARGE_UPLOADS;
 
     if (useChunkedUpload) {
       // Large file → chunked upload (bypasses Cloudflare 100MB limit)
