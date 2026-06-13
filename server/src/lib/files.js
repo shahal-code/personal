@@ -165,6 +165,9 @@ export async function calculateStorageUsage(storageRoot, configuredTotalBytes = 
   let usedBytes = 0;
   let fileCount = 0;
   let directoryCount = 0;
+  let largestFile = null;
+  let latestModifiedAt = null;
+  const fileTypes = {};
 
   async function walk(currentAbsolutePath) {
     const entries = await fs.readdir(currentAbsolutePath, { withFileTypes: true });
@@ -179,6 +182,19 @@ export async function calculateStorageUsage(storageRoot, configuredTotalBytes = 
       } else if (entry.isFile()) {
         fileCount += 1;
         usedBytes += stats.size;
+        const extension = path.extname(entry.name).slice(1).toLowerCase() || "other";
+        fileTypes[extension] = (fileTypes[extension] || 0) + 1;
+
+        if (!largestFile || stats.size > largestFile.size) {
+          largestFile = {
+            name: entry.name,
+            size: stats.size,
+          };
+        }
+
+        if (!latestModifiedAt || stats.mtime > latestModifiedAt) {
+          latestModifiedAt = stats.mtime;
+        }
       }
     }
   }
@@ -199,11 +215,23 @@ export async function calculateStorageUsage(storageRoot, configuredTotalBytes = 
     freeBytes = 0;
   }
 
+  const freePercent = totalBytes > 0 ? (freeBytes / totalBytes) * 100 : 0;
+  const health =
+    freePercent <= 5
+      ? { status: "critical", label: "Critical", message: "Storage is almost full" }
+      : freePercent <= 15
+        ? { status: "warning", label: "Low", message: "Storage space is running low" }
+        : { status: "healthy", label: "Healthy", message: "Storage capacity is available" };
+
   return {
     totalBytes,
     usedBytes,
     freeBytes,
     fileCount,
     directoryCount,
+    fileTypes,
+    largestFile,
+    lastSyncAt: latestModifiedAt?.toISOString() || null,
+    health,
   };
 }

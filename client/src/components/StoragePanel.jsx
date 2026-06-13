@@ -1,6 +1,6 @@
-import { formatBytes, formatPercent, formatTemperature } from "../api/http.js";
+import { formatBytes, formatDate, formatPercent, formatTemperature } from "../api/http.js";
 
-export default function StoragePanel({ storage, systemStatus }) {
+export default function StoragePanel({ storage, systemStatus, transferStatus }) {
   const total = Number(storage?.totalBytes || 0);
   const used = Number(storage?.usedBytes || 0);
   const free = Number(storage?.freeBytes || 0);
@@ -9,6 +9,8 @@ export default function StoragePanel({ storage, systemStatus }) {
   const lowStorage = total > 0 && (freePercent <= 10 || free < 5 * 1024 * 1024 * 1024);
   const batteryPercent = systemStatus?.battery?.percentage ?? null;
   const temperature = systemStatus?.temperature?.celsius ?? null;
+  const lowBattery = batteryPercent != null && batteryPercent <= 20 && !systemStatus?.battery?.charging;
+  const highTemperature = temperature != null && temperature >= 42;
   const memoryPercent =
     Number.isFinite(Number(systemStatus?.memory?.usedBytes)) && Number.isFinite(Number(systemStatus?.memory?.totalBytes))
       ? Math.round((Number(systemStatus.memory.usedBytes) / Number(systemStatus.memory.totalBytes)) * 100)
@@ -19,6 +21,14 @@ export default function StoragePanel({ storage, systemStatus }) {
       : systemStatus.battery.charging
         ? "Charging"
         : "On battery";
+  const fileTypeEntries = Object.entries(storage?.fileTypes || {})
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 4);
+  const fileTypeSummary =
+    fileTypeEntries.length > 0
+      ? fileTypeEntries.map(([extension, count]) => `${extension.toUpperCase()} ${count}`).join(" · ")
+      : "No files";
+  const network = systemStatus?.network;
 
   return (
     <section className="storage-panel">
@@ -29,12 +39,26 @@ export default function StoragePanel({ storage, systemStatus }) {
         </div>
         <span className="status-pill">{usedPercent}% used</span>
       </div>
-      {lowStorage ? (
-        <div className="storage-warning">
-          <strong>Storage health warning</strong>
-          <span>{formatBytes(free)} free. Large uploads may fail if the phone runs out of space.</span>
-        </div>
-      ) : null}
+      <div className="warning-list">
+        {lowStorage ? (
+          <div className="storage-warning storage-warning--danger">
+            <strong>Low storage</strong>
+            <span>{formatBytes(free)} free. Large uploads may fail.</span>
+          </div>
+        ) : null}
+        {lowBattery ? (
+          <div className="storage-warning">
+            <strong>Low battery</strong>
+            <span>{formatPercent(batteryPercent)} remaining. Connect the charger before large transfers.</span>
+          </div>
+        ) : null}
+        {highTemperature ? (
+          <div className="storage-warning storage-warning--danger">
+            <strong>High temperature</strong>
+            <span>{formatTemperature(temperature)}. Pause large transfers until the device cools.</span>
+          </div>
+        ) : null}
+      </div>
       <div className="storage-grid">
         <article className="metric-card">
           <span>Total</span>
@@ -51,6 +75,25 @@ export default function StoragePanel({ storage, systemStatus }) {
         <article className="metric-card">
           <span>Files</span>
           <strong>{storage?.fileCount ?? 0}</strong>
+        </article>
+        <article className="metric-card">
+          <span>Folders</span>
+          <strong>{storage?.directoryCount ?? 0}</strong>
+        </article>
+        <article className="metric-card">
+          <span>Storage health</span>
+          <strong className={`health-text health-text--${storage?.health?.status || "healthy"}`}>
+            {storage?.health?.label || "Healthy"}
+          </strong>
+        </article>
+        <article className="metric-card">
+          <span>Largest file</span>
+          <strong>{storage?.largestFile ? formatBytes(storage.largestFile.size) : "N/A"}</strong>
+          <small title={storage?.largestFile?.name || ""}>{storage?.largestFile?.name || "No files"}</small>
+        </article>
+        <article className="metric-card">
+          <span>Active uploads</span>
+          <strong>{transferStatus?.activeUploads || 0}</strong>
         </article>
       </div>
       <div className="status-grid">
@@ -77,6 +120,36 @@ export default function StoragePanel({ storage, systemStatus }) {
           <span>Uptime</span>
           <strong>{systemStatus?.uptime?.humanReadable || "N/A"}</strong>
           <p>Server status</p>
+        </article>
+        <article className="status-card">
+          <span>CPU usage</span>
+          <strong>{formatPercent(systemStatus?.cpu?.percentage)}</strong>
+          <p>{systemStatus?.cpu?.cores ? `${systemStatus.cpu.cores} logical cores` : "CPU unavailable"}</p>
+        </article>
+        <article className="status-card">
+          <span>Upload speed</span>
+          <strong>{formatBytes(transferStatus?.uploadBytesPerSecond || network?.uploadBytesPerSecond || 0)}/s</strong>
+          <p>{transferStatus?.activeUploads ? "Current browser upload" : "Server network traffic"}</p>
+        </article>
+        <article className="status-card">
+          <span>Download speed</span>
+          <strong>{formatBytes(network?.downloadBytesPerSecond || 0)}/s</strong>
+          <p>Server network traffic</p>
+        </article>
+        <article className="status-card">
+          <span>Network</span>
+          <strong>{network?.connected ? "Online" : "Offline"}</strong>
+          <p>{network?.type || "Network status unavailable"}</p>
+        </article>
+        <article className="status-card">
+          <span>File types</span>
+          <strong>{Object.keys(storage?.fileTypes || {}).length}</strong>
+          <p title={fileTypeSummary}>{fileTypeSummary}</p>
+        </article>
+        <article className="status-card">
+          <span>Last sync</span>
+          <strong>{storage?.lastSyncAt ? formatDate(storage.lastSyncAt) : "Never"}</strong>
+          <p>Latest stored-file activity</p>
         </article>
       </div>
       <div className="progress-track" aria-hidden="true">

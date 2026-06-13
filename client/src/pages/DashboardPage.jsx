@@ -772,7 +772,14 @@ export default function DashboardPage() {
         </header>
 
         <div id="storage">
-          <StoragePanel storage={storage} systemStatus={systemStatus} />
+          <StoragePanel
+            storage={storage}
+            systemStatus={systemStatus}
+            transferStatus={{
+              activeUploads: uploading ? uploadFileCount : 0,
+              uploadBytesPerSecond: uploading ? uploadSpeed : 0,
+            }}
+          />
         </div>
 
         {uploading || uploadPaused ? (

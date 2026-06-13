@@ -1,21 +1,29 @@
 import os from "node:os";
+import fs from "node:fs/promises";
 import { execFile } from "node:child_process";
+
+let previousNetworkSample = null;
 
 function runCommand(command, args, options = {}) {
   return new Promise((resolve) => {
-    execFile(
-      command,
-      args,
-      { timeout: 4000, windowsHide: true, ...options },
-      (error, stdout) => {
-        if (error) {
-          resolve("");
-          return;
-        }
+    try {
+      const child = execFile(
+        command,
+        args,
+        { timeout: 4000, windowsHide: true, ...options },
+        (error, stdout) => {
+          if (error) {
+            resolve("");
+            return;
+          }
 
-        resolve(String(stdout || "").trim());
-      }
-    );
+          resolve(String(stdout || "").trim());
+        }
+      );
+      child.on("error", () => resolve(""));
+    } catch {
+      resolve("");
+    }
   });
 }
 
@@ -26,14 +34,19 @@ function runShell(script) {
       return;
     }
 
-    execFile("sh", ["-lc", script], { timeout: 4000 }, (error, stdout) => {
-      if (error) {
-        resolve("");
-        return;
-      }
+    try {
+      const child = execFile("sh", ["-lc", script], { timeout: 4000 }, (error, stdout) => {
+        if (error) {
+          resolve("");
+          return;
+        }
 
-      resolve(String(stdout || "").trim());
-    });
+        resolve(String(stdout || "").trim());
+      });
+      child.on("error", () => resolve(""));
+    } catch {
+      resolve("");
+    }
   });
 }
 
@@ -180,8 +193,126 @@ function formatUptime(seconds) {
   return parts.join(" ");
 }
 
+function cpuSnapshot() {
+  return os.cpus().reduce(
+    (totals, cpu) => {
+      const times = Object.values(cpu.times);
+      totals.idle += cpu.times.idle;
+      totals.total += times.reduce((sum, value) => sum + value, 0);
+      return totals;
+    },
+    { idle: 0, total: 0 }
+  );
+}
+
+async function readCpuUsage() {
+  const first = cpuSnapshot();
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  const second = cpuSnapshot();
+  const idle = second.idle - first.idle;
+  const total = second.total - first.total;
+  const percentage = total > 0 ? Math.round((1 - idle / total) * 100) : null;
+
+  return {
+    percentage: Number.isFinite(percentage) ? Math.max(0, Math.min(100, percentage)) : null,
+    cores: os.cpus().length,
+  };
+}
+
+async function readLinuxNetworkCounters() {
+  try {
+    const contents = await fs.readFile("/proc/net/dev", "utf8");
+    return contents
+      .split("\n")
+      .slice(2)
+      .reduce(
+        (totals, line) => {
+          const [interfaceName, values] = line.trim().split(":");
+          if (!interfaceName || !values || interfaceName.trim() === "lo") {
+            return totals;
+          }
+
+          const fields = values.trim().split(/\s+/).map(Number);
+          totals.receivedBytes += Number.isFinite(fields[0]) ? fields[0] : 0;
+          totals.sentBytes += Number.isFinite(fields[8]) ? fields[8] : 0;
+          return totals;
+        },
+        { receivedBytes: 0, sentBytes: 0 }
+      );
+  } catch {
+    return null;
+  }
+}
+
+async function readWindowsNetworkCounters() {
+  const output = await runCommand("powershell.exe", [
+    "-NoProfile",
+    "-NonInteractive",
+    "-Command",
+    "$stats = Get-NetAdapterStatistics -ErrorAction SilentlyContinue | Measure-Object -Property ReceivedBytes,SentBytes -Sum; if ($stats) { [pscustomobject]@{ receivedBytes = $stats[0].Sum; sentBytes = $stats[1].Sum } | ConvertTo-Json -Compress }",
+  ]);
+
+  if (!output) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(output);
+    return {
+      receivedBytes: Number(parsed.receivedBytes) || 0,
+      sentBytes: Number(parsed.sentBytes) || 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function readNetworkStatus() {
+  const interfaces = os.networkInterfaces();
+  const connected = Object.values(interfaces)
+    .flat()
+    .some((address) => address && !address.internal && address.family === "IPv4");
+  const counters =
+    process.platform === "win32"
+      ? await readWindowsNetworkCounters()
+      : await readLinuxNetworkCounters();
+  const now = Date.now();
+  let downloadBytesPerSecond = null;
+  let uploadBytesPerSecond = null;
+
+  if (counters && previousNetworkSample) {
+    const elapsedSeconds = (now - previousNetworkSample.at) / 1000;
+    if (elapsedSeconds > 0) {
+      downloadBytesPerSecond = Math.max(
+        0,
+        Math.round((counters.receivedBytes - previousNetworkSample.receivedBytes) / elapsedSeconds)
+      );
+      uploadBytesPerSecond = Math.max(
+        0,
+        Math.round((counters.sentBytes - previousNetworkSample.sentBytes) / elapsedSeconds)
+      );
+    }
+  }
+
+  if (counters) {
+    previousNetworkSample = { ...counters, at: now };
+  }
+
+  return {
+    connected,
+    type: connected ? "Network connected" : "Offline",
+    downloadBytesPerSecond,
+    uploadBytesPerSecond,
+  };
+}
+
 export async function getSystemStatus() {
-  const [battery, temperature] = await Promise.all([readBatteryInfo(), readTemperatureInfo()]);
+  const [battery, temperature, cpu, network] = await Promise.all([
+    readBatteryInfo(),
+    readTemperatureInfo(),
+    readCpuUsage(),
+    readNetworkStatus(),
+  ]);
   const totalMemory = os.totalmem();
   const freeMemory = os.freemem();
 
@@ -201,5 +332,7 @@ export async function getSystemStatus() {
     temperature: {
       celsius: temperature.celsius,
     },
+    cpu,
+    network,
   };
 }

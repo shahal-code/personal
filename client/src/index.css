@@ -661,8 +661,43 @@ h2 {
   border: 1px solid rgba(251, 146, 60, 0.26);
 }
 
+.warning-list {
+  display: grid;
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.warning-list:empty {
+  display: none;
+}
+
+.storage-warning--danger {
+  color: #fecdd3;
+  background: rgba(251, 113, 133, 0.12);
+  border-color: rgba(251, 113, 133, 0.28);
+}
+
 .storage-warning span {
   color: var(--muted);
+}
+
+.metric-card small {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.health-text--healthy {
+  color: var(--success);
+}
+
+.health-text--warning {
+  color: #fbbf24;
+}
+
+.health-text--critical {
+  color: var(--danger);
 }
 
 .file-table {
