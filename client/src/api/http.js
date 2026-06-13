@@ -196,6 +196,82 @@ function sendChunk(path, blob, options = {}) {
   });
 }
 
+function sendStream(path, blob, options = {}) {
+  const { headers = {}, signal, onProgress, query = {} } = options;
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", buildUrl(`${path}${buildQueryString(query)}`), true);
+    xhr.withCredentials = true;
+    xhr.responseType = "text";
+    xhr.timeout = 120000;
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+
+    Object.entries(headers).forEach(([key, value]) => {
+      xhr.setRequestHeader(key, value);
+    });
+
+    if (signal) {
+      if (signal.aborted) {
+        xhr.abort();
+        reject(normalizeError("Upload cancelled", 0));
+        return;
+      }
+
+      signal.addEventListener(
+        "abort",
+        () => {
+          xhr.abort();
+          reject(normalizeError("Upload cancelled", 0));
+        },
+        { once: true }
+      );
+    }
+
+    xhr.upload.onprogress = (event) => {
+      if (typeof onProgress === "function" && event.lengthComputable) {
+        onProgress({
+          loaded: event.loaded,
+          total: event.total,
+          progress: event.total > 0 ? event.loaded / event.total : 0,
+        });
+      }
+    };
+
+    xhr.onload = async () => {
+      const contentType = xhr.getResponseHeader("content-type") || "";
+      const payload = contentType.includes("application/json")
+        ? await new Response(xhr.responseText).json().catch(() => ({}))
+        : xhr.responseText;
+
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const message =
+          typeof payload === "string"
+            ? payload
+            : payload?.message || payload?.error || xhr.statusText || "Upload failed";
+        reject(normalizeError(message, xhr.status, payload));
+        return;
+      }
+
+      resolve(payload);
+    };
+
+    xhr.onerror = () => {
+      reject(normalizeError("Upload failed", xhr.status || 0));
+    };
+
+    xhr.onabort = () => {
+      reject(normalizeError("Upload cancelled", xhr.status || 0));
+    };
+
+    xhr.ontimeout = () => {
+      reject(normalizeError("Upload timeout", 0));
+    };
+
+    xhr.send(blob);
+  });
+}
+
 export async function uploadFiles(path, options = {}) {
   const {
     files = [],
@@ -203,8 +279,6 @@ export async function uploadFiles(path, options = {}) {
     headers = {},
     signal,
     onProgress,
-    chunkSize = 8 * 1024 * 1024,
-    concurrency = 3,
   } = options;
 
   if (!Array.isArray(files) || files.length === 0) {
@@ -214,20 +288,13 @@ export async function uploadFiles(path, options = {}) {
   const totalBytes = files.reduce((sum, file) => sum + Number(file?.size || 0), 0);
   let uploadedBytes = 0;
   const uploaded = [];
-  const chunkPath = `${path.replace(/\/+$/, "")}/chunk`;
-
-  const maxRetries = 4;
+  const streamPath = `${path.replace(/\/+$/, "")}/stream`;
 
   for (const file of files) {
     const uploadId = crypto.randomUUID();
-    const totalChunks = Math.max(1, Math.ceil(file.size / chunkSize));
-    const chunkStates = Array.from({ length: totalChunks }, () => 0);
-    const maxConcurrentChunks = Math.max(1, Math.min(concurrency, totalChunks));
-    let nextChunkIndex = 0;
-    const fileUploaded = [];
+    let fileLoaded = 0;
 
     function emitProgress(extra = {}) {
-      const fileLoaded = chunkStates.reduce((sum, value) => sum + value, 0);
       const overallLoaded = Math.min(totalBytes, uploadedBytes + fileLoaded);
 
       if (typeof onProgress === "function") {
@@ -241,85 +308,50 @@ export async function uploadFiles(path, options = {}) {
       }
     }
 
-    async function uploadNextChunk() {
-      while (true) {
-        const chunkIndex = nextChunkIndex;
-        if (chunkIndex >= totalChunks) {
-          return;
-        }
+    let payload;
+    let lastError = null;
+    const maxRetries = 2;
 
-        nextChunkIndex += 1;
-
-        const start = chunkIndex * chunkSize;
-        const end = Math.min(file.size, start + chunkSize);
-        const chunk = file.slice(start, end);
-
-        let payload;
-        let lastError = null;
-
-        for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-          try {
-            payload = await sendChunk(chunkPath, chunk, {
-              headers,
-              signal,
-              query: {
-                path: targetPath,
-                name: file.name,
-                uploadId,
-                chunkIndex,
-                totalChunks,
-                final: chunkIndex === totalChunks - 1 ? "true" : "false",
-              },
-              onProgress: (progressEvent) => {
-                const currentLoaded = progressEvent.loaded || 0;
-                const chunkTotal = progressEvent.total || chunk.size || 0;
-                chunkStates[chunkIndex] = currentLoaded;
-                emitProgress({
-                  chunkIndex,
-                  totalChunks,
-                  chunkProgress: chunkTotal > 0 ? currentLoaded / chunkTotal : 0,
-                });
-              },
+    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+      try {
+        payload = await sendStream(streamPath, file, {
+          headers,
+          signal,
+          query: {
+            path: targetPath,
+            name: file.name,
+            uploadId,
+          },
+          onProgress: (progressEvent) => {
+            fileLoaded = progressEvent.loaded || 0;
+            emitProgress({
+              chunkProgress: progressEvent.total > 0 ? fileLoaded / progressEvent.total : 0,
             });
-            lastError = null;
-            break;
-          } catch (error) {
-            lastError = error;
-            if (!isRetryableUploadError(error) || attempt >= maxRetries) {
-              throw error;
-            }
-
-            await delay(500 * (attempt + 1));
-          }
-        }
-
-        if (lastError) {
-          throw lastError;
-        }
-
-        chunkStates[chunkIndex] = chunk.size;
-        emitProgress({
-          chunkIndex,
-          totalChunks,
-          chunkProgress: 1,
+          },
         });
-
-        if (payload?.uploaded?.length) {
-          fileUploaded.push(...payload.uploaded);
+        lastError = null;
+        break;
+      } catch (error) {
+        lastError = error;
+        if (!isRetryableUploadError(error) || attempt >= maxRetries) {
+          throw error;
         }
+
+        await delay(500 * (attempt + 1));
       }
     }
 
-    await Promise.all(Array.from({ length: maxConcurrentChunks }, () => uploadNextChunk()));
-
-    uploadedBytes = Math.min(totalBytes, uploadedBytes + file.size);
-    if (fileUploaded.length > 0) {
-      uploaded.push(...fileUploaded);
+    if (lastError) {
+      throw lastError;
     }
 
+    uploadedBytes = Math.min(totalBytes, uploadedBytes + file.size);
+    if (payload?.uploaded?.length) {
+      uploaded.push(...payload.uploaded);
+    }
+
+    fileLoaded = file.size;
     emitProgress({
-      chunkIndex: totalChunks - 1,
-      totalChunks,
       chunkProgress: 1,
     });
   }

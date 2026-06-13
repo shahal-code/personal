@@ -1,7 +1,10 @@
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import express, { Router } from "express";
 import multer from "multer";
+import { pipeline } from "node:stream/promises";
 import { STORAGE_ROOT, TEMP_DIR } from "../config/env.js";
 import { requireAdmin } from "../middleware/auth.js";
 import {
@@ -21,6 +24,7 @@ const router = Router();
 const upload = multer({ dest: TEMP_DIR, limits: { fileSize: 1024 * 1024 * 1024 * 2 } });
 const chunkUpload = express.raw({ type: "application/octet-stream", limit: "128mb" });
 const chunkSessionRoot = path.join(TEMP_DIR, "chunk-sessions");
+const streamUploadRoot = path.join(TEMP_DIR, "stream-uploads");
 
 async function ensureChunkSession(uploadId) {
   const sessionPath = path.join(chunkSessionRoot, uploadId);
@@ -152,6 +156,7 @@ async function getChunkSessionState(sessionPath) {
 async function ensureRootReady() {
   await ensureDirectory(STORAGE_ROOT);
   await ensureDirectory(TEMP_DIR);
+  await ensureDirectory(streamUploadRoot);
 }
 
 router.use(requireAdmin);
@@ -297,6 +302,57 @@ router.post("/upload/chunk", chunkUpload, async (req, res) => {
     uploadId,
     chunkIndex,
   });
+});
+
+router.post("/upload/stream", async (req, res, next) => {
+  await ensureRootReady();
+
+  const targetPath = parseRelativePath(req.query.path || "");
+  const fileName = ensureSafeName(req.query.name || "");
+  const uploadId = ensureSafeName(req.query.uploadId || randomUUID());
+  const destinationRelative = joinRelativePath(targetPath, fileName);
+  const destinationAbsolute = resolveStoragePath(STORAGE_ROOT, destinationRelative).absolutePath;
+  const tempPath = path.join(streamUploadRoot, `${uploadId}.partial`);
+
+  if (await fileExists(STORAGE_ROOT, destinationRelative)) {
+    return res.status(409).json({ message: `File already exists: ${fileName}` });
+  }
+
+  await fs.mkdir(path.dirname(destinationAbsolute), { recursive: true });
+
+  const writeStream = fsSync.createWriteStream(tempPath, { flags: "wx" });
+
+  try {
+    await pipeline(req, writeStream);
+    await fs.rename(tempPath, destinationAbsolute);
+
+    if (shouldGenerateHls(fileName)) {
+      await startHlsTranscode({
+        relativePath: destinationRelative,
+        sourcePath: destinationAbsolute,
+        fileName,
+      }).catch(() => {});
+    }
+
+    return res.status(201).json({
+      message: "Upload complete",
+      uploaded: [
+        {
+          name: fileName,
+          path: destinationRelative,
+        },
+      ],
+    });
+  } catch (error) {
+    await fs.rm(tempPath, { force: true }).catch(() => {});
+    if (error?.code === "ECONNABORTED" || error?.code === "ERR_STREAM_PREMATURE_CLOSE") {
+      return res.status(499).json({ message: "Request aborted" });
+    }
+
+    throw error;
+  } finally {
+    writeStream.destroy();
+  }
 });
 
 router.get("/upload/chunk/status", async (req, res) => {
