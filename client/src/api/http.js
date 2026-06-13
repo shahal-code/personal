@@ -51,6 +51,30 @@ async function parseResponse(response) {
     : response.text().catch(() => "");
 }
 
+function delay(ms) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function isRetryableUploadError(error) {
+  const message = String(error?.message || "").toLowerCase();
+  const status = Number(error?.status || 0);
+
+  if (message.includes("upload cancelled")) {
+    return false;
+  }
+
+  return (
+    status === 0 ||
+    status === 499 ||
+    status >= 500 ||
+    message.includes("request aborted") ||
+    message.includes("upload failed") ||
+    message.includes("networkerror") ||
+    message.includes("failed to fetch") ||
+    message.includes("timeout")
+  );
+}
+
 export async function request(path, options = {}) {
   const { method = "GET", body, headers = {}, signal } = options;
   const init = {
@@ -174,8 +198,8 @@ export async function uploadFiles(path, options = {}) {
     headers = {},
     signal,
     onProgress,
-    chunkSize = 64 * 1024 * 1024,
-    concurrency = 6,
+    chunkSize = 16 * 1024 * 1024,
+    concurrency = 4,
   } = options;
 
   if (!Array.isArray(files) || files.length === 0) {
@@ -186,6 +210,8 @@ export async function uploadFiles(path, options = {}) {
   let uploadedBytes = 0;
   const uploaded = [];
   const chunkPath = `${path.replace(/\/+$/, "")}/chunk`;
+
+  const maxRetries = 2;
 
   for (const file of files) {
     const uploadId = crypto.randomUUID();
@@ -223,28 +249,48 @@ export async function uploadFiles(path, options = {}) {
         const end = Math.min(file.size, start + chunkSize);
         const chunk = file.slice(start, end);
 
-        const payload = await sendChunk(chunkPath, chunk, {
-          headers,
-          signal,
-          query: {
-            path: targetPath,
-            name: file.name,
-            uploadId,
-            chunkIndex,
-            totalChunks,
-            final: chunkIndex === totalChunks - 1 ? "true" : "false",
-          },
-          onProgress: (progressEvent) => {
-            const currentLoaded = progressEvent.loaded || 0;
-            const chunkTotal = progressEvent.total || chunk.size || 0;
-            chunkStates[chunkIndex] = currentLoaded;
-            emitProgress({
-              chunkIndex,
-              totalChunks,
-              chunkProgress: chunkTotal > 0 ? currentLoaded / chunkTotal : 0,
+        let payload;
+        let lastError = null;
+
+        for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+          try {
+            payload = await sendChunk(chunkPath, chunk, {
+              headers,
+              signal,
+              query: {
+                path: targetPath,
+                name: file.name,
+                uploadId,
+                chunkIndex,
+                totalChunks,
+                final: chunkIndex === totalChunks - 1 ? "true" : "false",
+              },
+              onProgress: (progressEvent) => {
+                const currentLoaded = progressEvent.loaded || 0;
+                const chunkTotal = progressEvent.total || chunk.size || 0;
+                chunkStates[chunkIndex] = currentLoaded;
+                emitProgress({
+                  chunkIndex,
+                  totalChunks,
+                  chunkProgress: chunkTotal > 0 ? currentLoaded / chunkTotal : 0,
+                });
+              },
             });
-          },
-        });
+            lastError = null;
+            break;
+          } catch (error) {
+            lastError = error;
+            if (!isRetryableUploadError(error) || attempt >= maxRetries) {
+              throw error;
+            }
+
+            await delay(500 * (attempt + 1));
+          }
+        }
+
+        if (lastError) {
+          throw lastError;
+        }
 
         chunkStates[chunkIndex] = chunk.size;
         emitProgress({
