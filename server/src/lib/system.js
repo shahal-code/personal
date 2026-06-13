@@ -227,19 +227,23 @@ async function readProcCpuSnapshot() {
 }
 
 async function readTopCpuPercentage() {
-  const output = await runCommand("top", ["-b", "-n", "1"]);
+  const output =
+    (await runCommand("top", ["-b", "-n", "2", "-d", "1"])) ||
+    (await runCommand("top", ["-n", "2", "-d", "1"]));
   if (!output) {
     return null;
   }
 
-  const procpsIdle = output.match(/Cpu\(s\).*?([\d.]+)\s*id\b/i);
-  if (procpsIdle) {
+  const procpsMatches = [...output.matchAll(/Cpu\(s\).*?([\d.]+)\s*id\b/gi)];
+  const procpsIdle = procpsMatches.at(-1);
+  if (procpsIdle?.[1]) {
     const idle = Number(procpsIdle[1]);
     return Number.isFinite(idle) ? Math.max(0, Math.min(100, 100 - idle)) : null;
   }
 
-  const androidCpu = output.match(/([\d.]+)%cpu\b[^\n]*?([\d.]+)%idle\b/i);
-  if (androidCpu) {
+  const androidMatches = [...output.matchAll(/([\d.]+)%cpu\b[^\n]*?([\d.]+)%idle\b/gi)];
+  const androidCpu = androidMatches.at(-1);
+  if (androidCpu?.[1] && androidCpu?.[2]) {
     const total = Number(androidCpu[1]);
     const idle = Number(androidCpu[2]);
     if (Number.isFinite(total) && total > 0 && Number.isFinite(idle)) {
@@ -247,7 +251,26 @@ async function readTopCpuPercentage() {
     }
   }
 
+  const userSystemMatches = [
+    ...output.matchAll(/([\d.]+)%user\b[^\n]*?([\d.]+)%sys\b/gi),
+  ];
+  const userSystem = userSystemMatches.at(-1);
+  if (userSystem?.[1] && userSystem?.[2]) {
+    const user = Number(userSystem[1]);
+    const system = Number(userSystem[2]);
+    if (Number.isFinite(user) && Number.isFinite(system)) {
+      return Math.max(0, Math.min(100, user + system));
+    }
+  }
+
   return null;
+}
+
+async function readDumpsysCpuPercentage() {
+  const output = await runCommand("dumpsys", ["cpuinfo"]);
+  const match = output.match(/([\d.]+)%\s+TOTAL\b/i);
+  const percentage = Number(match?.[1]);
+  return Number.isFinite(percentage) ? Math.max(0, Math.min(100, percentage)) : null;
 }
 
 async function readCpuUsage() {
@@ -257,9 +280,22 @@ async function readCpuUsage() {
   const idle = second.idle - first.idle;
   const total = second.total - first.total;
   let percentage = total > 0 ? (1 - idle / total) * 100 : null;
+  let source = first && second ? "system counters" : null;
 
-  if (!Number.isFinite(percentage) || total <= 0) {
-    percentage = await readTopCpuPercentage();
+  if (!Number.isFinite(percentage) || percentage <= 0) {
+    const topPercentage = await readTopCpuPercentage();
+    if (Number.isFinite(topPercentage) && topPercentage > 0) {
+      percentage = topPercentage;
+      source = "top";
+    }
+  }
+
+  if (!Number.isFinite(percentage) || percentage <= 0) {
+    const dumpsysPercentage = await readDumpsysCpuPercentage();
+    if (Number.isFinite(dumpsysPercentage)) {
+      percentage = dumpsysPercentage;
+      source = "dumpsys";
+    }
   }
 
   const coreCount = os.cpus().length || os.availableParallelism?.() || null;
@@ -269,6 +305,7 @@ async function readCpuUsage() {
       ? Math.round(Math.max(0, Math.min(100, percentage)) * 10) / 10
       : null,
     cores: coreCount || null,
+    source: source || "unavailable",
   };
 }
 

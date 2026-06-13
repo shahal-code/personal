@@ -128,7 +128,11 @@ export default function StoragePanel({ storage, systemStatus, transferStatus }) 
         <article className="status-card">
           <span>CPU usage</span>
           <strong>{formattedCpuPercentage}</strong>
-          <p>{systemStatus?.cpu?.cores ? `${systemStatus.cpu.cores} logical cores` : "CPU unavailable"}</p>
+          <p>
+            {systemStatus?.cpu?.cores
+              ? `${systemStatus.cpu.cores} logical cores · ${systemStatus.cpu.source || "unknown source"}`
+              : "CPU unavailable"}
+          </p>
         </article>
         <article className="status-card">
           <span>Upload speed</span>
