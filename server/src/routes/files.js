@@ -27,6 +27,7 @@ const upload = multer({ dest: TEMP_DIR, limits: { fileSize: 1024 * 1024 * 1024 *
 const chunkUpload = express.raw({ type: "application/octet-stream", limit: "128mb" });
 const chunkSessionRoot = path.join(TEMP_DIR, "chunk-sessions");
 const streamUploadRoot = path.join(TEMP_DIR, "stream-uploads");
+const resumableUploadRoot = path.join(TEMP_DIR, "resumable-uploads");
 
 async function ensureChunkSession(uploadId) {
   const sessionPath = path.join(chunkSessionRoot, uploadId);
@@ -54,6 +55,48 @@ async function readStreamUploadState(uploadId) {
 async function writeStreamUploadState(uploadId, state) {
   await fs.mkdir(streamUploadRoot, { recursive: true });
   await fs.writeFile(getStreamUploadStatePath(uploadId), JSON.stringify(state, null, 2), "utf8");
+}
+
+function getResumableSessionPath(uploadId) {
+  return path.join(resumableUploadRoot, uploadId);
+}
+
+function getResumableMetaPath(uploadId) {
+  return path.join(getResumableSessionPath(uploadId), "meta.json");
+}
+
+function getResumableDataPath(uploadId) {
+  return path.join(getResumableSessionPath(uploadId), "upload.partial");
+}
+
+async function readResumableMeta(uploadId) {
+  try {
+    const raw = await fs.readFile(getResumableMetaPath(uploadId), "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+async function writeResumableMeta(uploadId, meta) {
+  await fs.mkdir(getResumableSessionPath(uploadId), { recursive: true });
+  await fs.writeFile(getResumableMetaPath(uploadId), JSON.stringify(meta, null, 2), "utf8");
+}
+
+async function getResumableOffset(uploadId) {
+  const stats = await fs.stat(getResumableDataPath(uploadId)).catch(() => null);
+  return stats?.isFile() ? stats.size : 0;
+}
+
+function buildUploadSessionPayload(uploadId, meta, offset, completed = false) {
+  return {
+    uploadId,
+    fileName: meta.fileName,
+    destinationRelative: meta.destinationRelative,
+    totalSize: meta.totalSize,
+    offset,
+    completed,
+  };
 }
 
 async function moveFileSafe(sourcePath, destinationPath) {
@@ -192,6 +235,7 @@ async function ensureRootReady() {
   await ensureDirectory(STORAGE_ROOT);
   await ensureDirectory(TEMP_DIR);
   await ensureDirectory(streamUploadRoot);
+  await ensureDirectory(resumableUploadRoot);
 }
 
 async function buildUploadedItem(absolutePath, relativePath) {
@@ -284,6 +328,159 @@ router.post("/upload", upload.array("files"), async (req, res) => {
   return res.status(201).json({
     message: "Upload complete",
     uploaded,
+  });
+});
+
+router.post("/upload/session", async (req, res) => {
+  await ensureRootReady();
+  const body = parseJsonBody(req);
+  const targetPath = parseRelativePath(body.path || "");
+  const fileName = ensureSafeName(body.name || "");
+  const totalSize = Number(body.size);
+  const uploadId = ensureSafeName(body.uploadId || randomUUID());
+  const fastUpload = body.fast === true;
+
+  if (!fileName) {
+    return res.status(400).json({ message: "File name is required" });
+  }
+
+  if (!Number.isFinite(totalSize) || totalSize <= 0) {
+    return res.status(400).json({ message: "File size is required" });
+  }
+
+  const destinationRelative = joinRelativePath(targetPath, fileName);
+  const destinationAbsolute = resolveStoragePath(STORAGE_ROOT, destinationRelative).absolutePath;
+  const finalStats = await fs.stat(destinationAbsolute).catch(() => null);
+
+  if (finalStats?.isFile()) {
+    if (finalStats.size === totalSize) {
+      const uploadedItem = await buildUploadedItem(destinationAbsolute, destinationRelative);
+      return res.status(200).json({
+        ...buildUploadSessionPayload(uploadId, { fileName, destinationRelative, totalSize }, totalSize, true),
+        uploaded: [uploadedItem],
+      });
+    }
+
+    return res.status(409).json({ message: `File already exists: ${fileName}` });
+  }
+
+  const existingMeta = await readResumableMeta(uploadId);
+  const meta =
+    existingMeta?.destinationRelative === destinationRelative && Number(existingMeta.totalSize) === totalSize
+      ? existingMeta
+      : {
+          fileName,
+          destinationRelative,
+          totalSize,
+          fastUpload,
+          createdAt: new Date().toISOString(),
+        };
+
+  await writeResumableMeta(uploadId, {
+    ...meta,
+    updatedAt: new Date().toISOString(),
+  });
+
+  const offset = await getResumableOffset(uploadId);
+  return res.status(201).json(buildUploadSessionPayload(uploadId, meta, offset));
+});
+
+router.get("/upload/session/:uploadId", async (req, res) => {
+  await ensureRootReady();
+  const uploadId = ensureSafeName(req.params.uploadId || "");
+  const meta = await readResumableMeta(uploadId);
+
+  if (!meta) {
+    return res.status(404).json({ message: "Upload session not found" });
+  }
+
+  const destinationAbsolute = resolveStoragePath(STORAGE_ROOT, meta.destinationRelative).absolutePath;
+  const finalStats = await fs.stat(destinationAbsolute).catch(() => null);
+  if (finalStats?.isFile() && finalStats.size === Number(meta.totalSize)) {
+    const uploadedItem = await buildUploadedItem(destinationAbsolute, meta.destinationRelative);
+    return res.json({
+      ...buildUploadSessionPayload(uploadId, meta, Number(meta.totalSize), true),
+      uploaded: [uploadedItem],
+    });
+  }
+
+  const offset = await getResumableOffset(uploadId);
+  return res.json(buildUploadSessionPayload(uploadId, meta, offset));
+});
+
+router.patch("/upload/session/:uploadId", express.raw({ type: "application/octet-stream", limit: "128mb" }), async (req, res) => {
+  await ensureRootReady();
+  const uploadId = ensureSafeName(req.params.uploadId || "");
+  const meta = await readResumableMeta(uploadId);
+
+  if (!meta) {
+    return res.status(404).json({ message: "Upload session not found" });
+  }
+
+  if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+    return res.status(400).json({ message: "Upload body is required" });
+  }
+
+  const requestedOffset = Number(req.header("Upload-Offset"));
+  const currentOffset = await getResumableOffset(uploadId);
+
+  if (!Number.isInteger(requestedOffset) || requestedOffset !== currentOffset) {
+    res.set("Upload-Offset", String(currentOffset));
+    return res.status(409).json({ message: "Upload offset mismatch", offset: currentOffset });
+  }
+
+  const nextOffset = currentOffset + req.body.length;
+  if (nextOffset > Number(meta.totalSize)) {
+    res.set("Upload-Offset", String(currentOffset));
+    return res.status(413).json({ message: "Upload exceeds expected file size", offset: currentOffset });
+  }
+
+  await fs.appendFile(getResumableDataPath(uploadId), req.body);
+  await writeResumableMeta(uploadId, {
+    ...meta,
+    updatedAt: new Date().toISOString(),
+  });
+
+  res.set("Upload-Offset", String(nextOffset));
+  return res.status(204).send();
+});
+
+router.post("/upload/session/:uploadId/complete", async (req, res) => {
+  await ensureRootReady();
+  const uploadId = ensureSafeName(req.params.uploadId || "");
+  const meta = await readResumableMeta(uploadId);
+
+  if (!meta) {
+    return res.status(404).json({ message: "Upload session not found" });
+  }
+
+  const offset = await getResumableOffset(uploadId);
+  if (offset !== Number(meta.totalSize)) {
+    return res.status(409).json({ message: "Upload incomplete", offset, totalSize: meta.totalSize });
+  }
+
+  const destinationAbsolute = resolveStoragePath(STORAGE_ROOT, meta.destinationRelative).absolutePath;
+  const finalStats = await fs.stat(destinationAbsolute).catch(() => null);
+  if (finalStats?.isFile() && finalStats.size !== Number(meta.totalSize)) {
+    return res.status(409).json({ message: `File already exists: ${meta.fileName}` });
+  }
+
+  await fs.mkdir(path.dirname(destinationAbsolute), { recursive: true });
+  await moveFileSafe(getResumableDataPath(uploadId), destinationAbsolute);
+  await fs.rm(getResumableSessionPath(uploadId), { recursive: true, force: true }).catch(() => {});
+
+  if (!meta.fastUpload && shouldGenerateHls(meta.fileName)) {
+    startHlsTranscode({
+      relativePath: meta.destinationRelative,
+      sourcePath: destinationAbsolute,
+      fileName: meta.fileName,
+    }).catch(() => {});
+  }
+
+  const uploadedItem = await buildUploadedItem(destinationAbsolute, meta.destinationRelative);
+  return res.status(201).json({
+    message: "Upload complete",
+    uploaded: [uploadedItem],
   });
 });
 

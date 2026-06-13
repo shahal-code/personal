@@ -9,6 +9,7 @@ const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "
 const CHUNK_SIZE = 24 * 1024 * 1024;
 const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024;
 const STREAM_LARGE_UPLOADS = import.meta.env.VITE_STREAM_LARGE_UPLOADS === "true";
+const UPLOAD_SESSION_STORAGE_KEY = "phonecloud.resumableUploads";
 
 function buildUrl(path) {
   if (/^https?:\/\//i.test(path)) {
@@ -56,6 +57,39 @@ async function parseResponse(response) {
 
 function delay(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function getUploadSessionKey(targetPath, file) {
+  return [targetPath || "", file.name, file.size, file.lastModified || 0].join("|");
+}
+
+function readUploadSessions() {
+  try {
+    const raw = window.localStorage.getItem(UPLOAD_SESSION_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeUploadSessions(sessions) {
+  try {
+    window.localStorage.setItem(UPLOAD_SESSION_STORAGE_KEY, JSON.stringify(sessions));
+  } catch {
+    // Ignore storage errors.
+  }
+}
+
+function rememberUploadSession(sessionKey, uploadId) {
+  const sessions = readUploadSessions();
+  sessions[sessionKey] = uploadId;
+  writeUploadSessions(sessions);
+}
+
+function forgetUploadSession(sessionKey) {
+  const sessions = readUploadSessions();
+  delete sessions[sessionKey];
+  writeUploadSessions(sessions);
 }
 
 function isRetryableUploadError(error) {
@@ -308,6 +342,90 @@ function sendStream(path, blob, options = {}) {
   });
 }
 
+function sendUploadSlice(path, blob, options = {}) {
+  const { headers = {}, signal, onProgress, uploadOffset = 0 } = options;
+  let lastProgressUpdate = 0;
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PATCH", buildUrl(path), true);
+    xhr.withCredentials = true;
+    xhr.responseType = "text";
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    xhr.setRequestHeader("Upload-Offset", String(uploadOffset));
+
+    Object.entries(headers).forEach(([key, value]) => {
+      xhr.setRequestHeader(key, value);
+    });
+
+    if (signal) {
+      if (signal.aborted) {
+        xhr.abort();
+        reject(normalizeError("Upload cancelled", 0));
+        return;
+      }
+
+      signal.addEventListener(
+        "abort",
+        () => {
+          xhr.abort();
+          reject(normalizeError("Upload cancelled", 0));
+        },
+        { once: true }
+      );
+    }
+
+    xhr.upload.onprogress = (event) => {
+      if (typeof onProgress === "function" && event.lengthComputable) {
+        const now = Date.now();
+        if (now - lastProgressUpdate >= 100 || event.loaded === event.total) {
+          lastProgressUpdate = now;
+          onProgress({
+            loaded: event.loaded,
+            total: event.total,
+            progress: event.total > 0 ? event.loaded / event.total : 0,
+          });
+        }
+      }
+    };
+
+    xhr.onload = async () => {
+      const contentType = xhr.getResponseHeader("content-type") || "";
+      const payload = contentType.includes("application/json")
+        ? await new Response(xhr.responseText).json().catch(() => ({}))
+        : xhr.responseText;
+
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const message =
+          typeof payload === "string"
+            ? payload
+            : payload?.message || payload?.error || xhr.statusText || "Upload failed";
+        reject(normalizeError(message, xhr.status, payload));
+        return;
+      }
+
+      resolve({
+        payload,
+        offset: Number(xhr.getResponseHeader("Upload-Offset") || payload?.offset || 0),
+      });
+    };
+
+    xhr.onerror = () => {
+      reject(normalizeError("Upload network error. The browser lost the connection before the server returned a response.", xhr.status || 0));
+    };
+
+    xhr.onabort = () => {
+      reject(normalizeError("Upload cancelled", xhr.status || 0));
+    };
+
+    xhr.ontimeout = () => {
+      reject(normalizeError("Upload timeout", 0));
+    };
+
+    xhr.send(blob);
+  });
+}
+
 async function sendChunked(basePath, file, options = {}) {
   const { headers = {}, signal, onProgress, query = {} } = options;
   const uploadId = crypto.randomUUID();
@@ -371,6 +489,111 @@ async function sendChunked(basePath, file, options = {}) {
   }
 }
 
+async function sendResumable(basePath, file, options = {}) {
+  const { headers = {}, signal, onProgress, query = {} } = options;
+  const sessionKey = getUploadSessionKey(query.path || "", file);
+  const savedSessions = readUploadSessions();
+  let uploadId = savedSessions[sessionKey] || "";
+
+  async function createSession() {
+    const session = await request(`${basePath}/session`, {
+      method: "POST",
+      body: {
+        path: query.path || "",
+        name: file.name,
+        size: file.size,
+        fast: query.fast === "true",
+        uploadId: uploadId || undefined,
+      },
+      signal,
+    });
+
+    uploadId = session.uploadId;
+    rememberUploadSession(sessionKey, uploadId);
+    return session;
+  }
+
+  let session = uploadId
+    ? await request(`${basePath}/session/${encodeURIComponent(uploadId)}`, { signal }).catch(() => null)
+    : null;
+
+  if (!session || session.fileName !== file.name || Number(session.totalSize || 0) !== Number(file.size || 0)) {
+    session = await createSession();
+  }
+
+  let offset = Number(session.offset || 0);
+  const totalChunks = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
+
+  while (offset < file.size) {
+    const start = offset;
+    const end = Math.min(start + CHUNK_SIZE, file.size);
+    const chunk = file.slice(start, end);
+    const chunkIndex = Math.floor(start / CHUNK_SIZE);
+    let attempts = 0;
+
+    while (attempts < 3) {
+      try {
+        const result = await sendUploadSlice(`${basePath}/session/${encodeURIComponent(uploadId)}`, chunk, {
+          headers,
+          signal,
+          uploadOffset: start,
+          onProgress: (event) => {
+            if (typeof onProgress === "function") {
+              const loaded = start + (event.loaded || 0);
+              onProgress({
+                loaded,
+                total: file.size,
+                progress: file.size > 0 ? loaded / file.size : 0,
+                chunkIndex,
+                totalChunks,
+                phase: event.loaded === event.total ? "Saving chunk" : "Uploading",
+              });
+            }
+          },
+        });
+
+        offset = Number(result.offset || end);
+        if (typeof onProgress === "function") {
+          onProgress({
+            loaded: offset,
+            total: file.size,
+            progress: file.size > 0 ? offset / file.size : 0,
+            chunkIndex,
+            totalChunks,
+            phase: "Chunk saved",
+          });
+        }
+        break;
+      } catch (error) {
+        attempts += 1;
+        const status = await request(`${basePath}/session/${encodeURIComponent(uploadId)}`, { signal }).catch(() => null);
+        if (status?.completed) {
+          forgetUploadSession(sessionKey);
+          return status;
+        }
+
+        if (Number.isFinite(Number(status?.offset))) {
+          offset = Number(status.offset);
+          break;
+        }
+
+        if (!isRetryableUploadError(error) || attempts >= 3) {
+          throw error;
+        }
+
+        await delay(500 * attempts);
+      }
+    }
+  }
+
+  const completed = await request(`${basePath}/session/${encodeURIComponent(uploadId)}/complete`, {
+    method: "POST",
+    signal,
+  });
+  forgetUploadSession(sessionKey);
+  return completed;
+}
+
 export async function uploadFiles(path, options = {}) {
   const {
     files = [],
@@ -416,7 +639,7 @@ export async function uploadFiles(path, options = {}) {
     if (useChunkedUpload) {
       // Large file → chunked upload (bypasses Cloudflare 100MB limit)
       try {
-        await sendChunked(path, file, {
+        payload = await sendResumable(path, file, {
           headers,
           signal,
           query: {
@@ -432,11 +655,6 @@ export async function uploadFiles(path, options = {}) {
           },
         });
 
-        // Verify file after chunked upload
-        payload = await verifyUploadedFile(targetPath, file.name, file.size);
-        if (!payload) {
-          throw normalizeError("Upload verification failed", 0);
-        }
         lastError = null;
       } catch (error) {
         lastError = error;
