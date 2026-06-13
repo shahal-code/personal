@@ -203,8 +203,8 @@ export async function uploadFiles(path, options = {}) {
     headers = {},
     signal,
     onProgress,
-    chunkSize = 4 * 1024 * 1024,
-    concurrency = 2,
+    chunkSize = 8 * 1024 * 1024,
+    concurrency = 3,
   } = options;
 
   if (!Array.isArray(files) || files.length === 0) {
