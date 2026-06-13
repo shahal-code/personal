@@ -418,7 +418,7 @@ router.post("/upload/stream", async (req, res) => {
   }
 });
 
-router.get("/upload/chunk/status"', async (req, res) => {
+router.get("/upload/chunk/status", async (req, res) => {
   await ensureRootReady();
 
   const uploadId = ensureSafeName(req.query.uploadId || "");
