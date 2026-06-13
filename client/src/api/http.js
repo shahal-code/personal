@@ -6,6 +6,8 @@ function normalizeError(message, status, details) {
 }
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
+const CHUNK_SIZE = 50 * 1024 * 1024; // 50MB per chunk
+const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024; // files above 100MB use chunked upload
 
 function buildUrl(path) {
   if (/^https?:\/\//i.test(path)) {
@@ -305,6 +307,55 @@ function sendStream(path, blob, options = {}) {
   });
 }
 
+async function sendChunked(basePath, file, options = {}) {
+  const { headers = {}, signal, onProgress, query = {} } = options;
+  const uploadId = crypto.randomUUID();
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+  let totalLoaded = 0;
+
+  for (let i = 0; i < totalChunks; i++) {
+    const start = i * CHUNK_SIZE;
+    const end = Math.min(start + CHUNK_SIZE, file.size);
+    const chunk = file.slice(start, end);
+
+    let success = false;
+    let attempts = 0;
+
+    while (!success && attempts < 3) {
+      try {
+        await sendChunk(`${basePath}/chunk`, chunk, {
+          headers,
+          signal,
+          query: {
+            ...query,
+            uploadId,
+            chunkIndex: i,
+            totalChunks,
+            final: i === totalChunks - 1 ? "true" : "false",
+          },
+          onProgress: (e) => {
+            const loaded = totalLoaded + (e.loaded || 0);
+            if (typeof onProgress === "function") {
+              onProgress({
+                loaded,
+                total: file.size,
+                progress: file.size > 0 ? loaded / file.size : 0,
+              });
+            }
+          },
+        });
+        success = true;
+      } catch (err) {
+        attempts++;
+        if (!isRetryableUploadError(err) || attempts >= 3) throw err;
+        await delay(500 * attempts);
+      }
+    }
+
+    totalLoaded += chunk.size;
+  }
+}
+
 export async function uploadFiles(path, options = {}) {
   const {
     files = [],
@@ -345,44 +396,77 @@ export async function uploadFiles(path, options = {}) {
     let payload;
     let lastError = null;
     const maxRetries = 2;
+    const isLargeFile = file.size > LARGE_FILE_THRESHOLD;
 
-    for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    if (isLargeFile) {
+      // Large file → chunked upload (bypasses Cloudflare 100MB limit)
       try {
-        payload = await sendStream(streamPath, file, {
+        await sendChunked(path, file, {
           headers,
           signal,
           query: {
             path: targetPath,
             name: file.name,
-            uploadId,
             fast: fastUpload ? "true" : "false",
           },
           onProgress: (progressEvent) => {
             fileLoaded = progressEvent.loaded || 0;
             emitProgress({
-              chunkProgress: progressEvent.total > 0 ? fileLoaded / progressEvent.total : 0,
+              chunkProgress: file.size > 0 ? fileLoaded / file.size : 0,
             });
           },
         });
-        lastError = null;
-        break;
-    } catch (error) {
-      lastError = error;
 
-      if (!fastUpload) {
-        const verified = await verifyUploadedFile(targetPath, file.name, file.size);
-        if (verified) {
-          payload = verified;
-          lastError = null;
-          break;
+        // Verify file after chunked upload
+        payload = await verifyUploadedFile(targetPath, file.name, file.size);
+        if (!payload) {
+          throw normalizeError("Upload verification failed", 0);
         }
-      }
-
-      if (!isRetryableUploadError(error) || attempt >= maxRetries) {
+        lastError = null;
+      } catch (error) {
+        lastError = error;
         throw error;
       }
+    } else {
+      // Small file → stream upload (faster for small files)
+      for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+        try {
+          payload = await sendStream(streamPath, file, {
+            headers,
+            signal,
+            query: {
+              path: targetPath,
+              name: file.name,
+              uploadId,
+              fast: fastUpload ? "true" : "false",
+            },
+            onProgress: (progressEvent) => {
+              fileLoaded = progressEvent.loaded || 0;
+              emitProgress({
+                chunkProgress: progressEvent.total > 0 ? fileLoaded / progressEvent.total : 0,
+              });
+            },
+          });
+          lastError = null;
+          break;
+        } catch (error) {
+          lastError = error;
 
-        await delay(500 * (attempt + 1));
+          if (!fastUpload) {
+            const verified = await verifyUploadedFile(targetPath, file.name, file.size);
+            if (verified) {
+              payload = verified;
+              lastError = null;
+              break;
+            }
+          }
+
+          if (!isRetryableUploadError(error) || attempt >= maxRetries) {
+            throw error;
+          }
+
+          await delay(500 * (attempt + 1));
+        }
       }
     }
 
@@ -396,9 +480,7 @@ export async function uploadFiles(path, options = {}) {
     }
 
     fileLoaded = file.size;
-    emitProgress({
-      chunkProgress: 1,
-    });
+    emitProgress({ chunkProgress: 1 });
   }
 
   return { uploaded };
