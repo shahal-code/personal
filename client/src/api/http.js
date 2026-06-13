@@ -128,6 +128,7 @@ function sendChunk(path, blob, options = {}) {
     xhr.open("POST", buildUrl(`${path}${buildQueryString(query)}`), true);
     xhr.withCredentials = true;
     xhr.responseType = "text";
+    xhr.timeout = 120000;
     xhr.setRequestHeader("Content-Type", "application/octet-stream");
 
     Object.entries(headers).forEach(([key, value]) => {
@@ -187,6 +188,10 @@ function sendChunk(path, blob, options = {}) {
       reject(normalizeError("Upload cancelled", xhr.status || 0));
     };
 
+    xhr.ontimeout = () => {
+      reject(normalizeError("Upload timeout", 0));
+    };
+
     xhr.send(blob);
   });
 }
@@ -198,8 +203,8 @@ export async function uploadFiles(path, options = {}) {
     headers = {},
     signal,
     onProgress,
-    chunkSize = 16 * 1024 * 1024,
-    concurrency = 4,
+    chunkSize = 4 * 1024 * 1024,
+    concurrency = 2,
   } = options;
 
   if (!Array.isArray(files) || files.length === 0) {
@@ -211,7 +216,7 @@ export async function uploadFiles(path, options = {}) {
   const uploaded = [];
   const chunkPath = `${path.replace(/\/+$/, "")}/chunk`;
 
-  const maxRetries = 2;
+  const maxRetries = 4;
 
   for (const file of files) {
     const uploadId = crypto.randomUUID();
