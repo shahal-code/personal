@@ -23,6 +23,7 @@ export default defineConfig({
       "/items": "http://127.0.0.1:3000",
       "/storage": "http://127.0.0.1:3000",
       "/system-status": "http://127.0.0.1:3000",
+      "/cpu-status": "http://127.0.0.1:3000",
       "/health": "http://127.0.0.1:3000",
     },
   },

@@ -317,6 +317,15 @@ export default function DashboardPage() {
     }
   }
 
+  async function loadCpuStatus() {
+    try {
+      const cpu = await request("/cpu-status");
+      setSystemStatus((current) => ({ ...(current || {}), cpu }));
+    } catch {
+      // Keep the most recent CPU reading when a live refresh fails.
+    }
+  }
+
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const path = params.get("path") || "";
@@ -327,11 +336,26 @@ export default function DashboardPage() {
 
   useEffect(() => {
     loadSystemStatus();
-    const interval = window.setInterval(() => {
-      loadSystemStatus();
-    }, 15000);
-
+    const interval = window.setInterval(loadSystemStatus, 5000);
     return () => window.clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timeoutId = null;
+
+    async function refreshCpu() {
+      await loadCpuStatus();
+      if (!cancelled) {
+        timeoutId = window.setTimeout(refreshCpu, 2000);
+      }
+    }
+
+    refreshCpu();
+    return () => {
+      cancelled = true;
+      if (timeoutId) window.clearTimeout(timeoutId);
+    };
   }, []);
 
   useEffect(() => {

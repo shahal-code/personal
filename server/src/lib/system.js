@@ -326,6 +326,10 @@ async function readCpuUsage() {
   };
 }
 
+export async function getCpuStatus() {
+  return readCpuUsage();
+}
+
 async function readLinuxNetworkCounters() {
   try {
     const contents = await fs.readFile("/proc/net/dev", "utf8");
