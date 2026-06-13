@@ -560,6 +560,13 @@ h2 {
   font-weight: 700;
 }
 
+.upload-panel__controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
 .upload-panel__copy {
   margin: 0 0 10px;
   color: var(--muted);
@@ -930,6 +937,15 @@ h2 {
     margin: 0;
     padding: 10px 0 0;
     background: linear-gradient(180deg, transparent, rgba(14, 24, 37, 0.96) 36%);
+  }
+
+  .upload-panel__header {
+    align-items: flex-start;
+  }
+
+  .upload-panel__controls {
+    width: 100%;
+    justify-content: space-between;
   }
 }
 

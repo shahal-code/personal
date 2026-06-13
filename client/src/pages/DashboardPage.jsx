@@ -155,6 +155,7 @@ export default function DashboardPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const uploadRef = useRef(null);
+  const uploadAbortRef = useRef(null);
   const messageTimerRef = useRef(null);
   const uploadCompletionRef = useRef(false);
   const [directory, setDirectory] = useState({ items: [], currentPath: "/", parentPath: "/" });
@@ -310,6 +311,8 @@ export default function DashboardPage() {
     const files = Array.from(event.target.files || []);
     if (files.length === 0) return;
 
+    const uploadController = new AbortController();
+    uploadAbortRef.current = uploadController;
     const uploadPath = directory.currentPath === "/" ? "" : directory.currentPath.replace(/^\/+/, "");
     setUploading(true);
     setUploadProgress(0);
@@ -328,6 +331,7 @@ export default function DashboardPage() {
       const result = await upload("/upload", {
         body: formData,
         fastUpload: fastUploadMode,
+        signal: uploadController.signal,
         onProgress: ({ progress, fileName, phase, chunkIndex, totalChunks }) => {
           setUploadProgress(Math.round(progress * 100));
           if (fileName) {
@@ -360,8 +364,15 @@ export default function DashboardPage() {
       void loadData(uploadPath);
       void loadSystemStatus();
     } catch (requestError) {
-      setError(requestError.message || "Upload failed");
+      if (requestError.message === "Upload cancelled") {
+        setMessage("Upload cancelled");
+      } else {
+        setError(requestError.message || "Upload failed");
+      }
     } finally {
+      if (uploadAbortRef.current === uploadController) {
+        uploadAbortRef.current = null;
+      }
       setUploading(false);
       setUploadProgress(0);
       setUploadFileName("");
@@ -371,6 +382,10 @@ export default function DashboardPage() {
       clearUploadSession();
       event.target.value = "";
     }
+  }
+
+  function handleCancelUpload() {
+    uploadAbortRef.current?.abort();
   }
 
   async function handleCreateFolder() {
@@ -559,7 +574,12 @@ export default function DashboardPage() {
                   ? `${uploadPhase || "Uploading"}: ${uploadFileName}`
                   : uploadPhase || "Uploading files"}
               </span>
-              <strong>{uploadProgress}%</strong>
+              <div className="upload-panel__controls">
+                <strong>{uploadProgress}%</strong>
+                <button className="ghost-button ghost-button--danger" type="button" onClick={handleCancelUpload}>
+                  Cancel
+                </button>
+              </div>
             </div>
             <p className="upload-panel__copy">
               {uploadFileCount > 1

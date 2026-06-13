@@ -408,17 +408,13 @@ router.get("/upload/session/:uploadId", async (req, res) => {
   return res.json(buildUploadSessionPayload(uploadId, meta, offset));
 });
 
-router.patch("/upload/session/:uploadId", express.raw({ type: "application/octet-stream", limit: "128mb" }), async (req, res) => {
+router.patch("/upload/session/:uploadId", async (req, res) => {
   await ensureRootReady();
   const uploadId = ensureSafeName(req.params.uploadId || "");
   const meta = await readResumableMeta(uploadId);
 
   if (!meta) {
     return res.status(404).json({ message: "Upload session not found" });
-  }
-
-  if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
-    return res.status(400).json({ message: "Upload body is required" });
   }
 
   const requestedOffset = Number(req.header("Upload-Offset"));
@@ -429,19 +425,40 @@ router.patch("/upload/session/:uploadId", express.raw({ type: "application/octet
     return res.status(409).json({ message: "Upload offset mismatch", offset: currentOffset });
   }
 
-  const nextOffset = currentOffset + req.body.length;
+  const contentLength = Number(req.header("Content-Length"));
+  if (!Number.isFinite(contentLength) || contentLength <= 0) {
+    res.set("Upload-Offset", String(currentOffset));
+    return res.status(411).json({ message: "Content-Length is required", offset: currentOffset });
+  }
+
+  const nextOffset = currentOffset + contentLength;
   if (nextOffset > Number(meta.totalSize)) {
     res.set("Upload-Offset", String(currentOffset));
     return res.status(413).json({ message: "Upload exceeds expected file size", offset: currentOffset });
   }
 
-  await fs.appendFile(getResumableDataPath(uploadId), req.body);
+  await fs.mkdir(getResumableSessionPath(uploadId), { recursive: true });
+  const writeStream = fsSync.createWriteStream(getResumableDataPath(uploadId), { flags: "a" });
+
+  try {
+    await pipeline(req, writeStream);
+  } catch (error) {
+    writeStream.destroy();
+    throw error;
+  }
+
+  const savedOffset = await getResumableOffset(uploadId);
+  if (savedOffset !== nextOffset) {
+    res.set("Upload-Offset", String(savedOffset));
+    return res.status(500).json({ message: "Upload slice was not fully saved", offset: savedOffset });
+  }
+
   await writeResumableMeta(uploadId, {
     ...meta,
     updatedAt: new Date().toISOString(),
   });
 
-  res.set("Upload-Offset", String(nextOffset));
+  res.set("Upload-Offset", String(savedOffset));
   return res.status(204).send();
 });
 
