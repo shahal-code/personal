@@ -36,6 +36,19 @@ async function cleanupChunkSession(sessionPath) {
   await fs.rm(sessionPath, { recursive: true, force: true }).catch(() => {});
 }
 
+async function moveFileSafe(sourcePath, destinationPath) {
+  try {
+    await fs.rename(sourcePath, destinationPath);
+  } catch (error) {
+    if (error?.code !== "EXDEV") {
+      throw error;
+    }
+
+    await fs.copyFile(sourcePath, destinationPath);
+    await fs.rm(sourcePath, { force: true });
+  }
+}
+
 async function readCursor(sessionPath) {
   try {
     const raw = await fs.readFile(path.join(sessionPath, ".cursor"), "utf8");
@@ -120,7 +133,7 @@ async function tryFinalizeChunkSession(sessionPath, destinationAbsolute, totalCh
     }
 
     const livePath = await ensureLiveFile(sessionPath);
-    await fs.rename(livePath, destinationAbsolute);
+    await moveFileSafe(livePath, destinationAbsolute);
     await cleanupChunkSession(sessionPath);
     return true;
   } finally {
@@ -157,6 +170,19 @@ async function ensureRootReady() {
   await ensureDirectory(STORAGE_ROOT);
   await ensureDirectory(TEMP_DIR);
   await ensureDirectory(streamUploadRoot);
+}
+
+async function buildUploadedItem(absolutePath, relativePath) {
+  const stats = await fs.stat(absolutePath);
+  return {
+    name: path.basename(absolutePath),
+    path: relativePath,
+    size: stats.size,
+    modifiedAt: stats.mtime.toISOString(),
+    createdAt: stats.birthtime.toISOString(),
+    type: "file",
+    extension: path.extname(absolutePath).slice(1).toLowerCase(),
+  };
 }
 
 router.use(requireAdmin);
@@ -286,14 +312,11 @@ router.post("/upload/chunk", chunkUpload, async (req, res) => {
       }).catch(() => {});
     }
 
+    const uploadedItem = await buildUploadedItem(destinationAbsolute, destinationRelative);
+
     return res.status(201).json({
       message: "Upload complete",
-      uploaded: [
-        {
-          name: fileName,
-          path: destinationRelative,
-        },
-      ],
+      uploaded: [uploadedItem],
     });
   }
 
@@ -324,7 +347,7 @@ router.post("/upload/stream", async (req, res, next) => {
 
   try {
     await pipeline(req, writeStream);
-    await fs.rename(tempPath, destinationAbsolute);
+    await moveFileSafe(tempPath, destinationAbsolute);
 
     if (shouldGenerateHls(fileName)) {
       await startHlsTranscode({
@@ -334,14 +357,11 @@ router.post("/upload/stream", async (req, res, next) => {
       }).catch(() => {});
     }
 
+    const uploadedItem = await buildUploadedItem(destinationAbsolute, destinationRelative);
+
     return res.status(201).json({
       message: "Upload complete",
-      uploaded: [
-        {
-          name: fileName,
-          path: destinationRelative,
-        },
-      ],
+      uploaded: [uploadedItem],
     });
   } catch (error) {
     await fs.rm(tempPath, { force: true }).catch(() => {});

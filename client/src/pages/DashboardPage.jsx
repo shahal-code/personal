@@ -42,6 +42,19 @@ function humanFileType(item) {
   return extension.toUpperCase();
 }
 
+function sortDirectoryItems(items) {
+  return [...items].sort((left, right) => {
+    if (left.type !== right.type) {
+      return left.type === "folder" ? -1 : 1;
+    }
+
+    return String(left.name || "").localeCompare(String(right.name || ""), undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
+  });
+}
+
 function breadcrumbSegments(currentPath) {
   const trimmed = currentPath === "/" ? "" : currentPath.replace(/^\/+|\/+$/g, "");
   if (!trimmed) {
@@ -199,17 +212,18 @@ export default function DashboardPage() {
       return;
     }
 
+    const uploadPath = directory.currentPath === "/" ? "" : directory.currentPath.replace(/^\/+/, "");
     setUploading(true);
     setUploadProgress(0);
     setUploadFileName("");
     setRestoredUpload(null);
     setError("");
     const formData = new FormData();
-    formData.append("path", directory.currentPath === "/" ? "" : directory.currentPath.replace(/^\/+/, ""));
+    formData.append("path", uploadPath);
     files.forEach((file) => formData.append("files", file));
 
     try {
-      await upload("/upload", {
+      const result = await upload("/upload", {
         body: formData,
         onProgress: ({ progress, fileName }) => {
           setUploadProgress(Math.round(progress * 100));
@@ -218,8 +232,38 @@ export default function DashboardPage() {
           }
         },
       });
-      await loadData(directory.currentPath === "/" ? "" : directory.currentPath.replace(/^\/+/, ""));
+
+      if (result?.uploaded?.length) {
+        setDirectory((current) => {
+          const currentItems = Array.isArray(current.items) ? current.items : [];
+          const incoming = result.uploaded
+            .filter((item) => item?.path)
+            .map((item) => ({
+              ...item,
+              displayPath: item.path,
+              type: item.type || "file",
+              extension: item.extension || "",
+              modifiedAt: item.modifiedAt || new Date().toISOString(),
+              createdAt: item.createdAt || new Date().toISOString(),
+              size: Number(item.size || 0),
+            }));
+          const merged = sortDirectoryItems([
+            ...incoming.filter((item) => !currentItems.some((existing) => existing.path === item.path)),
+            ...currentItems,
+          ]);
+
+          return {
+            ...current,
+            items: merged,
+          };
+        });
+      }
+
+      setUploading(false);
+      setUploadProgress(100);
+      setUploadFileName(files[files.length - 1]?.name || "");
       setMessage(`${files.length} file${files.length > 1 ? "s" : ""} uploaded`);
+      await loadData(uploadPath);
       loadSystemStatus();
     } catch (requestError) {
       setError(requestError.message || "Upload failed");

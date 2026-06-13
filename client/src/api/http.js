@@ -128,7 +128,6 @@ function sendChunk(path, blob, options = {}) {
     xhr.open("POST", buildUrl(`${path}${buildQueryString(query)}`), true);
     xhr.withCredentials = true;
     xhr.responseType = "text";
-    xhr.timeout = 120000;
     xhr.setRequestHeader("Content-Type", "application/octet-stream");
 
     Object.entries(headers).forEach(([key, value]) => {
@@ -204,7 +203,6 @@ function sendStream(path, blob, options = {}) {
     xhr.open("POST", buildUrl(`${path}${buildQueryString(query)}`), true);
     xhr.withCredentials = true;
     xhr.responseType = "text";
-    xhr.timeout = 120000;
     xhr.setRequestHeader("Content-Type", "application/octet-stream");
 
     Object.entries(headers).forEach(([key, value]) => {
