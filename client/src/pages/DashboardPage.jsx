@@ -435,7 +435,7 @@ export default function DashboardPage() {
     setDirectory((current) => {
       const currentItems = Array.isArray(current.items) ? current.items : [];
       const incoming = items
-        .filter((item) => item?.path)
+        .filter((item) => item?.path && !String(item.path).endsWith(".partial"))
         .map((item) => ({
           ...item,
           displayPath: item.path,

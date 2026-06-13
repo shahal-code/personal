@@ -27,6 +27,10 @@ export async function listDirectory(storageRoot, relativePath = "") {
 
   const items = await Promise.all(
     entries.map(async (entry) => {
+      if (entry.name.startsWith(".") || entry.name.endsWith(".partial")) {
+        return null;
+      }
+
       const childRelative = safeRelative ? `${safeRelative}/${entry.name}` : entry.name;
       const childAbsolute = path.join(absolutePath, entry.name);
       const stats = await fs.stat(childAbsolute);
@@ -44,7 +48,9 @@ export async function listDirectory(storageRoot, relativePath = "") {
     })
   );
 
-  items.sort((left, right) => {
+  const visibleItems = items.filter(Boolean);
+
+  visibleItems.sort((left, right) => {
     if (left.type !== right.type) {
       return left.type === "folder" ? -1 : 1;
     }
@@ -55,7 +61,7 @@ export async function listDirectory(storageRoot, relativePath = "") {
   return {
     currentPath: toDisplayPath(safeRelative),
     parentPath: toDisplayPath(getParentRelativePath(safeRelative)),
-    items,
+    items: visibleItems,
   };
 }
 
