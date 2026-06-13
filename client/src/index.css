@@ -42,6 +42,7 @@ body,
 
 body {
   min-height: 100svh;
+  overflow-x: hidden;
 }
 
 button,
@@ -306,6 +307,7 @@ h2 {
 .workspace {
   display: grid;
   gap: 22px;
+  min-width: 0;
 }
 
 .topbar,
@@ -501,11 +503,14 @@ h2 {
   color: inherit;
   padding: 0;
   text-align: left;
+  min-width: 0;
 }
 
 .file-name strong,
 .file-name span {
   display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .file-name span {
@@ -569,18 +574,27 @@ h2 {
   display: grid;
   place-items: center;
   padding: 24px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  z-index: 20;
+  -webkit-overflow-scrolling: touch;
 }
 
 .modal-card {
   width: min(100%, 520px);
+  max-height: calc(100svh - 48px);
   border-radius: 28px;
   padding: 24px;
   display: grid;
   gap: 18px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .modal-card--preview {
   width: min(100%, 980px);
+  grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
 .modal-backdrop--wide {
@@ -598,6 +612,7 @@ h2 {
   border: 1px solid var(--border);
   background: rgba(7, 13, 22, 0.72);
   overflow: hidden;
+  min-width: 0;
 }
 
 .preview-media,
@@ -608,6 +623,10 @@ h2 {
   min-height: 420px;
   display: block;
   background: #000;
+}
+
+.preview-media {
+  touch-action: manipulation;
 }
 
 .preview-media--audio {
@@ -671,6 +690,15 @@ h2 {
 }
 
 @media (max-width: 760px) {
+  .app-shell {
+    padding: 12px;
+    gap: 14px;
+  }
+
+  .workspace {
+    gap: 14px;
+  }
+
   .auth-hero,
   .auth-card,
   .sidebar,
@@ -695,6 +723,11 @@ h2 {
   .file-row {
     grid-template-columns: 1fr;
     gap: 10px;
+    padding: 12px;
+  }
+
+  .file-name > div:last-child {
+    min-width: 0;
   }
 
   .row-actions {
@@ -718,11 +751,87 @@ h2 {
     width: 100%;
   }
 
+  .modal-backdrop {
+    align-items: start;
+    padding: 10px;
+  }
+
+  .modal-card {
+    max-height: calc(100svh - 20px);
+    padding: 14px;
+    border-radius: 20px;
+  }
+
+  .modal-card--preview {
+    gap: 12px;
+  }
+
   .preview-frame,
   .preview-media,
   .preview-embed,
   .preview-image,
   .preview-text {
     min-height: 260px;
+  }
+
+  .preview-frame {
+    max-height: 58svh;
+  }
+
+  .preview-media,
+  .preview-embed,
+  .preview-image {
+    height: min(58svh, 56.25vw);
+    min-height: 210px;
+  }
+
+  .preview-media {
+    object-fit: contain;
+  }
+
+  .preview-status {
+    position: sticky;
+    bottom: 0;
+    margin: 0;
+    padding: 10px 0 0;
+    background: linear-gradient(180deg, transparent, rgba(14, 24, 37, 0.96) 36%);
+  }
+}
+
+@media (max-width: 430px) {
+  .screen-center,
+  .auth-shell {
+    padding: 12px;
+  }
+
+  .auth-card,
+  .sidebar,
+  .topbar,
+  .storage-panel,
+  .directory-panel {
+    padding: 16px;
+  }
+
+  .storage-grid,
+  .status-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .toolbar,
+  .row-actions,
+  .modal-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .preview-frame {
+    max-height: 52svh;
+  }
+
+  .preview-media,
+  .preview-embed,
+  .preview-image {
+    height: min(52svh, 62vw);
+    min-height: 190px;
   }
 }

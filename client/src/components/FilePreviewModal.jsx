@@ -50,7 +50,11 @@ export default function FilePreviewModal({ item, onClose }) {
   }, []);
 
   const useHls = kind === "video" && transcodeStatus?.hlsReady && !videoError;
-  const streamUrl = useHls ? hlsUrl : livePreviewUrl;
+
+  useEffect(() => {
+    setVideoError(false);
+    setTranscodeStatus(null);
+  }, [item?.path]);
 
   useEffect(() => {
     let active = true;
@@ -164,7 +168,19 @@ export default function FilePreviewModal({ item, onClose }) {
       return undefined;
     }
 
-    if (hlsModule?.isSupported?.()) {
+    if (supportsNativeHls) {
+      videoElement.src = hlsUrl;
+      videoElement.load();
+      return undefined;
+    }
+
+    if (!hlsModule) {
+      videoElement.src = livePreviewUrl;
+      videoElement.load();
+      return undefined;
+    }
+
+    if (hlsModule.isSupported?.()) {
       const hls = new hlsModule({
         enableWorker: true,
         lowLatencyMode: true,
@@ -200,9 +216,10 @@ export default function FilePreviewModal({ item, onClose }) {
       };
     }
 
-    videoElement.src = hlsUrl;
+    videoElement.src = livePreviewUrl;
+    videoElement.load();
     return undefined;
-  }, [kind, hlsModule, hlsUrl, livePreviewUrl, useHls]);
+  }, [kind, hlsModule, hlsUrl, livePreviewUrl, supportsNativeHls, useHls]);
 
   // ✅ Timeout fallback — if video not loading after 5 seconds, force direct stream
   useEffect(() => {
@@ -310,6 +327,7 @@ export default function FilePreviewModal({ item, onClose }) {
               preload="metadata"
               onError={handleVideoError}
               onStalled={handleVideoStalled}
+              onClick={(event) => event.stopPropagation()}
             />
           ) : kind === "audio" ? (
             <audio className="preview-media preview-media--audio" controls autoPlay src={previewUrl} crossOrigin="use-credentials" />
