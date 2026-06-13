@@ -14,6 +14,7 @@ import {
   renameEntry,
 } from "../lib/files.js";
 import { joinRelativePath, resolveStoragePath, ensureSafeName } from "../lib/path.js";
+import { getHlsPlaylist, readHlsStatus, rewriteHlsPlaylist, shouldGenerateHls, startHlsTranscode, getHlsSegmentPath } from "../lib/hls.js";
 import { parseJsonBody, parseRelativePath } from "../utils/validation.js";
 
 const router = Router();
@@ -272,6 +273,14 @@ router.post("/upload/chunk", chunkUpload, async (req, res) => {
 
   const finalized = await tryFinalizeChunkSession(sessionPath, destinationAbsolute, totalChunks);
   if (finalized) {
+    if (shouldGenerateHls(fileName)) {
+      await startHlsTranscode({
+        relativePath: destinationRelative,
+        sourcePath: destinationAbsolute,
+        fileName,
+      }).catch(() => {});
+    }
+
     return res.status(201).json({
       message: "Upload complete",
       uploaded: [
@@ -298,6 +307,13 @@ router.get("/upload/chunk/status", async (req, res) => {
   const state = await getChunkSessionState(sessionPath);
 
   return res.json(state);
+});
+
+router.get("/video/transcode/status", async (req, res) => {
+  await ensureRootReady();
+  const relativePath = parseRelativePath(req.query.path || "");
+  const status = await readHlsStatus(relativePath);
+  return res.json(status);
 });
 
 router.get("/download", async (req, res) => {
@@ -370,6 +386,34 @@ router.get("/preview/live", async (req, res) => {
   }
 
   return res.status(404).json({ message: "Live preview unavailable" });
+});
+
+router.get("/preview/hls", async (req, res) => {
+  await ensureRootReady();
+  const relativePath = parseRelativePath(req.query.path || "");
+  const status = await readHlsStatus(relativePath);
+
+  if (!status.hlsReady) {
+    return res.status(404).json({ message: "HLS playlist not ready" });
+  }
+
+  const playlistText = await getHlsPlaylist(relativePath);
+  if (!playlistText) {
+    return res.status(404).json({ message: "HLS playlist not ready" });
+  }
+
+  return res
+    .type("application/vnd.apple.mpegurl")
+    .send(rewriteHlsPlaylist(relativePath, playlistText));
+});
+
+router.get("/preview/hls/segment", async (req, res) => {
+  await ensureRootReady();
+  const relativePath = parseRelativePath(req.query.path || "");
+  const fileName = ensureSafeName(req.query.file || "");
+  const segmentPath = await getHlsSegmentPath(relativePath, fileName);
+
+  return res.sendFile(segmentPath);
 });
 
 router.delete("/delete", async (req, res) => {

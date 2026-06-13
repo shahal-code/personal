@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { fetchText, resolveUrl } from "../api/http.js";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { fetchText, resolveUrl, request } from "../api/http.js";
 
 function getPreviewKind(item) {
   const extension = (item?.extension || "").toLowerCase();
@@ -32,11 +32,23 @@ function getPreviewKind(item) {
 
 export default function FilePreviewModal({ item, onClose }) {
   const kind = useMemo(() => getPreviewKind(item), [item]);
-  const [loading, setLoading] = useState(kind !== "video" && kind !== "audio" && kind !== "image" && kind !== "pdf");
+  const videoRef = useRef(null);
+  const hlsRef = useRef(null);
+  const [loading, setLoading] = useState(kind === "text");
   const [error, setError] = useState("");
   const [text, setText] = useState("");
+  const [transcodeStatus, setTranscodeStatus] = useState(null);
+  const [hlsModule, setHlsModule] = useState(null);
   const previewUrl = resolveUrl(`/preview?path=${encodeURIComponent(item.path)}`);
   const livePreviewUrl = resolveUrl(`/preview/live?path=${encodeURIComponent(item.path)}`);
+  const hlsUrl = resolveUrl(`/preview/hls?path=${encodeURIComponent(item.path)}`);
+  const supportsNativeHls = useMemo(() => {
+    const video = document.createElement("video");
+    return video.canPlayType("application/vnd.apple.mpegurl");
+  }, []);
+
+  const useHls = kind === "video" && transcodeStatus?.hlsReady;
+  const streamUrl = useHls ? hlsUrl : livePreviewUrl;
 
   useEffect(() => {
     let active = true;
@@ -45,10 +57,10 @@ export default function FilePreviewModal({ item, onClose }) {
       setError("");
       setText("");
 
-        if (kind === "video" || kind === "audio" || kind === "image" || kind === "pdf" || kind === "generic") {
-          setLoading(kind === "generic");
-          return;
-        }
+      if (kind === "video" || kind === "audio" || kind === "image" || kind === "pdf" || kind === "generic") {
+        setLoading(false);
+        return;
+      }
 
       setLoading(true);
 
@@ -79,6 +91,117 @@ export default function FilePreviewModal({ item, onClose }) {
     };
   }, [item?.path, kind]);
 
+  useEffect(() => {
+    if (kind !== "video") {
+      return undefined;
+    }
+
+    let active = true;
+
+    async function loadStatus() {
+      try {
+        const status = await request(`/video/transcode/status?path=${encodeURIComponent(item.path)}`);
+        if (!active) {
+          return;
+        }
+        setTranscodeStatus(status);
+      } catch {
+        if (!active) {
+          return;
+        }
+        setTranscodeStatus(null);
+      }
+    }
+
+    loadStatus();
+    const interval = window.setInterval(loadStatus, 3000);
+
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [item.path, kind]);
+
+  useEffect(() => {
+    if (kind !== "video" || !transcodeStatus?.hlsReady || hlsModule) {
+      return undefined;
+    }
+
+    let active = true;
+    import("hls.js").then((module) => {
+      if (!active) {
+        return;
+      }
+
+      setHlsModule(module.default || module);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [kind, transcodeStatus?.hlsReady, hlsModule]);
+
+  useEffect(() => {
+    if (kind !== "video") {
+      return undefined;
+    }
+
+    const videoElement = videoRef.current;
+    if (!videoElement) {
+      return undefined;
+    }
+
+    if (!useHls) {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+
+      videoElement.src = streamUrl;
+      return undefined;
+    }
+
+    if (hlsModule?.isSupported?.()) {
+      const hls = new hlsModule({
+        enableWorker: true,
+        lowLatencyMode: true,
+      });
+
+      hls.loadSource(hlsUrl);
+      hls.attachMedia(videoElement);
+      hlsRef.current = hls;
+
+      hls.on(hlsModule.Events.ERROR, (_, data) => {
+        if (data?.fatal) {
+          hls.destroy();
+          hlsRef.current = null;
+          videoElement.src = streamUrl;
+          setTranscodeStatus((current) => ({ ...current, hlsReady: false }));
+        }
+      });
+
+      return () => {
+        hls.destroy();
+        if (hlsRef.current === hls) {
+          hlsRef.current = null;
+        }
+      };
+    }
+
+    videoElement.src = hlsUrl;
+    return undefined;
+  }, [kind, hlsModule, hlsUrl, streamUrl, useHls]);
+
+  useEffect(
+    () => () => {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+    },
+    []
+  );
+
   return (
     <div className="modal-backdrop modal-backdrop--wide" role="presentation" onMouseDown={onClose}>
       <div className="modal-card modal-card--preview" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
@@ -99,9 +222,9 @@ export default function FilePreviewModal({ item, onClose }) {
           ) : error ? (
             <div className="error-banner">{error}</div>
           ) : kind === "video" ? (
-          <video className="preview-media" controls autoPlay playsInline src={livePreviewUrl || previewUrl} />
-        ) : kind === "audio" ? (
-          <audio className="preview-media preview-media--audio" controls autoPlay src={previewUrl} />
+            <video ref={videoRef} className="preview-media" controls autoPlay playsInline muted={false} />
+          ) : kind === "audio" ? (
+            <audio className="preview-media preview-media--audio" controls autoPlay src={previewUrl} />
           ) : kind === "image" ? (
             <img className="preview-image" src={previewUrl} alt={item.name} />
           ) : kind === "pdf" ? (
@@ -112,6 +235,13 @@ export default function FilePreviewModal({ item, onClose }) {
             <div className="empty-state">This file cannot be previewed in-browser.</div>
           )}
         </div>
+
+        {kind === "video" && transcodeStatus ? (
+          <div className="preview-status">
+            <span>Playback</span>
+            <strong>{transcodeStatus.status === "ready" ? "HLS ready" : transcodeStatus.status === "processing" ? "Transcoding" : "Direct stream"}</strong>
+          </div>
+        ) : null}
       </div>
     </div>
   );

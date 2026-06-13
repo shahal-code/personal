@@ -617,6 +617,19 @@ h2 {
   background: rgba(7, 13, 22, 0.72);
 }
 
+.preview-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  color: var(--muted);
+}
+
+.preview-status strong {
+  color: var(--text);
+}
+
 .modal-header,
 .modal-actions {
   display: flex;
