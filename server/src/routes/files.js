@@ -395,6 +395,7 @@ router.post("/upload/stream", async (req, res) => {
   const targetPath = parseRelativePath(req.query.path || "");
   const fileName = ensureSafeName(req.query.name || "");
   const uploadId = ensureSafeName(req.query.uploadId || randomUUID());
+  const totalSize = Number(req.query.totalSize);
   const fastUpload = req.query.fast === "true";
   const destinationRelative = joinRelativePath(targetPath, fileName);
   const destinationAbsolute = resolveStoragePath(STORAGE_ROOT, destinationRelative).absolutePath;
@@ -402,20 +403,22 @@ router.post("/upload/stream", async (req, res) => {
   const statePath = getStreamUploadStatePath(uploadId);
   const existingState = await readStreamUploadState(uploadId);
 
-  if (existingState?.destinationRelative === destinationRelative) {
-    const finalExists = await fileExists(STORAGE_ROOT, destinationRelative);
-    if (finalExists) {
+  const finalStats = await fs.stat(destinationAbsolute).catch(() => null);
+  if (finalStats?.isFile()) {
+    if (existingState?.destinationRelative === destinationRelative || (Number.isFinite(totalSize) && finalStats.size === totalSize)) {
       const uploadedItem = await buildUploadedItem(destinationAbsolute, destinationRelative);
       return res.status(200).json({
         message: "Upload complete",
         uploaded: [uploadedItem],
       });
     }
+
+    return res.status(409).json({ message: `File already exists: ${fileName}` });
   }
 
   await fs.mkdir(path.dirname(destinationAbsolute), { recursive: true });
 
-  const writeStream = fsSync.createWriteStream(tempPath, { flags: "wx" });
+  const writeStream = fsSync.createWriteStream(tempPath, { flags: "w" });
 
   try {
     await pipeline(req, writeStream);
@@ -448,6 +451,17 @@ router.post("/upload/stream", async (req, res) => {
       uploaded: [uploadedItem],
     });
   } catch (error) {
+    const partialStats = await fs.stat(tempPath).catch(() => null);
+    console.error("Stream upload failed", {
+      fileName,
+      destinationRelative,
+      uploadId,
+      code: error?.code,
+      message: error?.message,
+      partialBytes: partialStats?.size || 0,
+      expectedBytes: Number.isFinite(totalSize) ? totalSize : 0,
+    });
+
     await fs.rm(tempPath, { force: true }).catch(() => {});
     if (error?.code === "ECONNABORTED" || error?.code === "ERR_STREAM_PREMATURE_CLOSE") {
       return res.status(499).json({ message: "Request aborted" });
@@ -602,12 +616,23 @@ router.get("/items", async (req, res) => {
   await ensureRootReady();
   const currentPath = parseRelativePath(req.query.path || "");
   const { absolutePath } = resolveStoragePath(STORAGE_ROOT, currentPath);
-  const stats = await readEntryStats(absolutePath);
+  const stats = await readEntryStats(absolutePath).catch((error) => {
+    if (error?.code === "ENOENT") {
+      return null;
+    }
+
+    throw error;
+  });
+
+  if (!stats) {
+    return res.status(404).json({ message: "Item not found" });
+  }
 
   return res.json({
     path: currentPath,
     type: stats.isDirectory ? "folder" : "file",
     size: stats.size,
+    extension: stats.isDirectory ? "" : path.extname(currentPath).slice(1).toLowerCase(),
     createdAt: stats.createdAt.toISOString(),
     updatedAt: stats.updatedAt.toISOString(),
   });

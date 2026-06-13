@@ -453,6 +453,7 @@ export async function uploadFiles(path, options = {}) {
               path: targetPath,
               name: file.name,
               uploadId,
+              totalSize: file.size,
               fast: fastUpload ? "true" : "false",
             },
             onProgress: (progressEvent) => {
@@ -467,13 +468,15 @@ export async function uploadFiles(path, options = {}) {
         } catch (error) {
           lastError = error;
 
-          if (!fastUpload) {
-            const verified = await verifyUploadedFile(targetPath, file.name, file.size);
-            if (verified) {
-              payload = verified;
-              lastError = null;
-              break;
-            }
+          const verified = await verifyUploadedFile(targetPath, file.name, file.size);
+          if (verified) {
+            payload = verified;
+            lastError = null;
+            break;
+          }
+
+          if (file.size > LARGE_FILE_THRESHOLD && fileLoaded >= file.size * 0.95) {
+            throw error;
           }
 
           if (!isRetryableUploadError(error) || attempt >= maxRetries) {
