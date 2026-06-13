@@ -75,6 +75,31 @@ function isRetryableUploadError(error) {
   );
 }
 
+async function verifyUploadedFile(targetPath, fileName, expectedSize) {
+  const relativePath = targetPath ? `${targetPath.replace(/\/+$/, "")}/${fileName}` : fileName;
+
+  try {
+    const item = await request(`/items?path=${encodeURIComponent(relativePath)}`);
+    return item?.type === "file" && Number(item.size || 0) === Number(expectedSize || 0)
+      ? {
+          uploaded: [
+            {
+              name: fileName,
+              path: relativePath,
+              size: Number(item.size || 0),
+              type: "file",
+              extension: item.extension || "",
+              modifiedAt: item.updatedAt || new Date().toISOString(),
+              createdAt: item.createdAt || new Date().toISOString(),
+            },
+          ],
+        }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function request(path, options = {}) {
   const { method = "GET", body, headers = {}, signal } = options;
   const init = {
@@ -333,6 +358,14 @@ export async function uploadFiles(path, options = {}) {
         break;
       } catch (error) {
         lastError = error;
+
+        const verified = await verifyUploadedFile(targetPath, file.name, file.size);
+        if (verified) {
+          payload = verified;
+          lastError = null;
+          break;
+        }
+
         if (!isRetryableUploadError(error) || attempt >= maxRetries) {
           throw error;
         }

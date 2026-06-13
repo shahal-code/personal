@@ -56,12 +56,14 @@ async function writeStreamUploadState(uploadId, state) {
 
 async function moveFileSafe(sourcePath, destinationPath) {
   try {
+    await fs.rm(destinationPath, { force: true });
     await fs.rename(sourcePath, destinationPath);
   } catch (error) {
     if (error?.code !== "EXDEV") {
       throw error;
     }
 
+    await fs.rm(destinationPath, { force: true });
     await fs.copyFile(sourcePath, destinationPath);
     await fs.rm(sourcePath, { force: true });
   }
@@ -367,10 +369,6 @@ router.post("/upload/stream", async (req, res) => {
         uploaded: [uploadedItem],
       });
     }
-  }
-
-  if (await fileExists(STORAGE_ROOT, destinationRelative)) {
-    return res.status(409).json({ message: `File already exists: ${fileName}` });
   }
 
   await fs.mkdir(path.dirname(destinationAbsolute), { recursive: true });

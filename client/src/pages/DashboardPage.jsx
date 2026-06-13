@@ -127,6 +127,7 @@ export default function DashboardPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadFileName, setUploadFileName] = useState("");
+  const [uploadPhase, setUploadPhase] = useState("");
   const [restoredUpload, setRestoredUpload] = useState(null);
   const [fastUploadMode, setFastUploadMode] = useState(true);
   const [message, setMessage] = useState("");
@@ -194,6 +195,7 @@ export default function DashboardPage() {
       setRestoredUpload(saved);
       setUploadProgress(saved.progress || 0);
       setUploadFileName(saved.fileName || "");
+      setUploadPhase(saved.phase || "");
     }
   }, []);
 
@@ -247,6 +249,7 @@ export default function DashboardPage() {
         uploading,
         progress: uploadProgress,
         fileName: uploadFileName,
+        phase: uploadPhase,
         path: directory.currentPath,
         updatedAt: Date.now(),
       });
@@ -254,7 +257,7 @@ export default function DashboardPage() {
     }
 
     clearUploadSession();
-  }, [uploading, uploadProgress, uploadFileName, directory.currentPath]);
+  }, [uploading, uploadProgress, uploadFileName, uploadPhase, directory.currentPath]);
 
   async function handleUpload(event) {
     const files = Array.from(event.target.files || []);
@@ -266,6 +269,7 @@ export default function DashboardPage() {
     setUploading(true);
     setUploadProgress(0);
     setUploadFileName("");
+    setUploadPhase("Uploading");
     setRestoredUpload(null);
     setError("");
     const formData = new FormData();
@@ -281,6 +285,7 @@ export default function DashboardPage() {
           if (fileName) {
             setUploadFileName(fileName);
           }
+          setUploadPhase(progress >= 1 ? "Finalizing" : "Uploading");
         },
       });
 
@@ -311,17 +316,19 @@ export default function DashboardPage() {
       }
 
       setUploading(false);
-      setUploadProgress(100);
-      setUploadFileName(files[files.length - 1]?.name || "");
+      setUploadProgress(0);
+      setUploadFileName("");
+      setUploadPhase("");
       setMessage(`${files.length} file${files.length > 1 ? "s" : ""} uploaded`);
-      await loadData(uploadPath);
-      loadSystemStatus();
+      void loadData(uploadPath);
+      void loadSystemStatus();
     } catch (requestError) {
       setError(requestError.message || "Upload failed");
     } finally {
       setUploading(false);
       setUploadProgress(0);
       setUploadFileName("");
+      setUploadPhase("");
       clearUploadSession();
       event.target.value = "";
     }
@@ -473,7 +480,11 @@ export default function DashboardPage() {
         {uploading ? (
           <section className="upload-panel" aria-live="polite">
             <div className="upload-panel__header">
-              <span>{uploadFileName ? `Uploading ${uploadFileName}` : "Uploading files"}</span>
+              <span>
+                {uploadFileName
+                  ? `${uploadPhase || "Uploading"} ${uploadFileName}`
+                  : uploadPhase || "Uploading files"}
+              </span>
               <strong>{uploadProgress}%</strong>
             </div>
             <p className="upload-panel__copy">
@@ -488,7 +499,11 @@ export default function DashboardPage() {
         ) : restoredUpload ? (
           <section className="upload-panel" aria-live="polite">
             <div className="upload-panel__header">
-              <span>{restoredUpload.fileName ? `Upload interrupted: ${restoredUpload.fileName}` : "Upload interrupted"}</span>
+              <span>
+                {restoredUpload.fileName
+                  ? `Upload interrupted: ${restoredUpload.fileName}`
+                  : "Upload interrupted"}
+              </span>
               <strong>{restoredUpload.progress || 0}%</strong>
             </div>
             <p className="upload-panel__copy">Refresh stops the browser upload. Re-select the file to continue.</p>

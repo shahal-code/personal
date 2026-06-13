@@ -222,11 +222,11 @@ export default function FilePreviewModal({ item, onClose }) {
           ) : error ? (
             <div className="error-banner">{error}</div>
           ) : kind === "video" ? (
-            <video ref={videoRef} className="preview-media" controls autoPlay playsInline muted={false} />
+            <video ref={videoRef} className="preview-media" controls autoPlay playsInline muted={false} crossOrigin="anonymous" />
           ) : kind === "audio" ? (
-            <audio className="preview-media preview-media--audio" controls autoPlay src={previewUrl} />
+            <audio className="preview-media preview-media--audio" controls autoPlay src={previewUrl} crossOrigin="anonymous" />
           ) : kind === "image" ? (
-            <img className="preview-image" src={previewUrl} alt={item.name} />
+            <img className="preview-image" src={previewUrl} alt={item.name} crossOrigin="anonymous" />
           ) : kind === "pdf" ? (
             <iframe className="preview-embed" title={item.name} src={previewUrl} />
           ) : kind === "text" ? (
