@@ -287,26 +287,7 @@ export default function DashboardPage() {
           if (fileName) {
             setUploadFileName(fileName);
           }
-          setUploadPhase(progress >= 1 ? "Finalizing" : "Uploading");
-
-          if (progress >= 1 && !uploadCompletionRef.current) {
-            uploadCompletionRef.current = true;
-            setUploading(false);
-            setUploadProgress(100);
-            setUploadPhase("Saving");
-            setMessage(`${files.length} file${files.length > 1 ? "s" : ""} uploaded`);
-            appendItems(
-              files.map((file) => ({
-                name: file.name,
-                path: uploadPath ? `${uploadPath.replace(/\/+$/, "")}/${file.name}` : file.name,
-                size: file.size,
-                type: "file",
-                extension: file.name.includes(".") ? file.name.split(".").pop().toLowerCase() : "",
-                modifiedAt: new Date().toISOString(),
-                createdAt: new Date().toISOString(),
-              }))
-            );
-          }
+          setUploadPhase(progress >= 1 ? "Saving" : "Uploading");
         },
       });
 
@@ -314,19 +295,15 @@ export default function DashboardPage() {
         appendItems(result.uploaded);
       }
 
-      if (!uploadCompletionRef.current) {
-        setUploading(false);
-        setUploadProgress(0);
-        setUploadFileName("");
-        setUploadPhase("");
-        setMessage(`${files.length} file${files.length > 1 ? "s" : ""} uploaded`);
-        void loadData(uploadPath);
-        void loadSystemStatus();
-      }
+      setUploading(false);
+      setUploadProgress(0);
+      setUploadFileName("");
+      setUploadPhase("");
+      setMessage(`${files.length} file${files.length > 1 ? "s" : ""} uploaded`);
+      void loadData(uploadPath);
+      void loadSystemStatus();
     } catch (requestError) {
-      if (!uploadCompletionRef.current) {
-        setError(requestError.message || "Upload failed");
-      }
+      setError(requestError.message || "Upload failed");
     } finally {
       setUploading(false);
       setUploadProgress(0);

@@ -430,7 +430,21 @@ router.get("/upload/chunk/status", async (req, res) => {
 router.get("/video/transcode/status", async (req, res) => {
   await ensureRootReady();
   const relativePath = parseRelativePath(req.query.path || "");
-  const status = await readHlsStatus(relativePath);
+  let status = await readHlsStatus(relativePath);
+
+  if (status.status === "idle") {
+    const fileName = path.basename(relativePath);
+    const { absolutePath: sourcePath } = resolveStoragePath(STORAGE_ROOT, relativePath);
+
+    startHlsTranscode({
+      relativePath,
+      sourcePath,
+      fileName,
+    }).catch(() => {});
+
+    status = await readHlsStatus(relativePath);
+  }
+
   return res.json(status);
 });
 
