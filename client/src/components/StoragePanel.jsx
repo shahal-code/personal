@@ -7,8 +7,8 @@ export default function StoragePanel({ storage, systemStatus }) {
   const usedPercent = total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0;
   const freePercent = total > 0 ? Math.max(0, Math.round((free / total) * 100)) : 0;
   const lowStorage = total > 0 && (freePercent <= 10 || free < 5 * 1024 * 1024 * 1024);
-  const batteryPercent = systemStatus?.battery?.percentage ?? systemStatus?.batteryPercentage ?? null;
-  const temperature = systemStatus?.temperature?.celsius ?? systemStatus?.temperatureCelsius ?? null;
+  const batteryPercent = systemStatus?.battery?.percentage ?? null;
+  const temperature = systemStatus?.temperature?.celsius ?? null;
   const memoryPercent =
     Number.isFinite(Number(systemStatus?.memory?.usedBytes)) && Number.isFinite(Number(systemStatus?.memory?.totalBytes))
       ? Math.round((Number(systemStatus.memory.usedBytes) / Number(systemStatus.memory.totalBytes)) * 100)
@@ -62,7 +62,7 @@ export default function StoragePanel({ storage, systemStatus }) {
         <article className="status-card">
           <span>Temperature</span>
           <strong>{formatTemperature(temperature)}</strong>
-          <p>{temperature == null ? "Install Termux:API for live temperature" : systemStatus?.temperature?.source || "Best-effort sensor reading"}</p>
+          <p>{temperature == null ? "Temperature unavailable" : "Live sensor reading"}</p>
         </article>
         <article className="status-card">
           <span>Memory</span>
@@ -76,7 +76,7 @@ export default function StoragePanel({ storage, systemStatus }) {
         <article className="status-card">
           <span>Uptime</span>
           <strong>{systemStatus?.uptime?.humanReadable || "N/A"}</strong>
-          <p>{systemStatus?.hostname || "Server status"}</p>
+          <p>Server status</p>
         </article>
       </div>
       <div className="progress-track" aria-hidden="true">

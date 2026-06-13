@@ -30,36 +30,58 @@ export function getRequestToken(req) {
   return getBearerToken(req) || getCookieToken(req);
 }
 
+async function authenticateAdmin(req) {
+  const token = getRequestToken(req);
+
+  if (!token) {
+    return null;
+  }
+
+  const payload = jwt.verify(token, JWT_SECRET, {
+    algorithms: ["HS256"],
+    audience: "phone-cloud-admin",
+    issuer: "phone-cloud",
+  });
+  if (payload.email !== ADMIN_EMAIL || payload.role !== "admin") {
+    return null;
+  }
+
+  if (payload.jti && (await isTokenRevoked(payload.jti))) {
+    return null;
+  }
+
+  return {
+    email: payload.email,
+    jti: payload.jti,
+    role: payload.role,
+    exp: payload.exp,
+  };
+}
+
 export async function requireAdmin(req, res, next) {
   try {
-    const token = getRequestToken(req);
-
-    if (!token) {
+    const user = await authenticateAdmin(req);
+    if (!user) {
       return res.status(401).json({ message: "Authentication required" });
     }
 
-    const payload = jwt.verify(token, JWT_SECRET, {
-      algorithms: ["HS256"],
-      audience: "phone-cloud-admin",
-      issuer: "phone-cloud",
-    });
-    if (payload.email !== ADMIN_EMAIL || payload.role !== "admin") {
-      return res.status(401).json({ message: "Invalid session" });
-    }
-
-    if (payload.jti && (await isTokenRevoked(payload.jti))) {
-      return res.status(401).json({ message: "Session has been revoked" });
-    }
-
-    req.user = {
-      email: payload.email,
-      jti: payload.jti,
-      role: payload.role,
-      exp: payload.exp,
-    };
-
+    req.user = user;
     return next();
   } catch {
     return res.status(401).json({ message: "Authentication required" });
+  }
+}
+
+export async function requireAdminPage(req, res, next) {
+  try {
+    const user = await authenticateAdmin(req);
+    if (!user) {
+      return res.redirect(302, "/login");
+    }
+
+    req.user = user;
+    return next();
+  } catch {
+    return res.redirect(302, "/login");
   }
 }

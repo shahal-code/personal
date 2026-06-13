@@ -11,6 +11,7 @@ import storageRoutes from "./routes/storage.js";
 import { CLIENT_ORIGINS, DATA_DIR, STORAGE_ROOT } from "./config/env.js";
 import { assertRequiredEnv } from "./config/env.js";
 import { notFoundHandler, errorHandler } from "./middleware/error.js";
+import { requireAdminPage } from "./middleware/auth.js";
 import { noStore, rateLimit, requireTrustedOrigin, securityRequestId } from "./middleware/security.js";
 import { ensureDirectory } from "./lib/files.js";
 import { pruneExpiredTokens } from "./lib/sessions.js";
@@ -84,6 +85,9 @@ export async function createApp() {
   const clientDist = path.resolve(appDir, "..", "..", "client", "dist");
   try {
     await fs.access(clientDist);
+    app.get(/^\/app(?:\/.*)?$/, requireAdminPage, noStore, (req, res) => {
+      return res.sendFile(path.join(clientDist, "index.html"));
+    });
     app.use(express.static(clientDist, { index: false, maxAge: "1h" }));
     app.get(/.*/, async (req, res) => {
       if (

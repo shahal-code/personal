@@ -8,6 +8,7 @@ import multer from "multer";
 import { pipeline } from "node:stream/promises";
 import { STORAGE_ROOT, TEMP_DIR } from "../config/env.js";
 import { requireAdmin } from "../middleware/auth.js";
+import { noStore } from "../middleware/security.js";
 import {
   createFolder,
   ensureDirectory,
@@ -264,7 +265,7 @@ async function buildUploadedItem(absolutePath, relativePath) {
   };
 }
 
-router.use(requireAdmin);
+router.use(requireAdmin, noStore);
 
 router.get("/files", async (req, res) => {
   await ensureRootReady();

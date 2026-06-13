@@ -186,10 +186,7 @@ export async function getSystemStatus() {
   const freeMemory = os.freemem();
 
   return {
-    hostname: os.hostname(),
-    platform: os.platform(),
     uptime: {
-      seconds: Math.floor(os.uptime()),
       humanReadable: formatUptime(os.uptime()),
     },
     memory: {
@@ -197,9 +194,12 @@ export async function getSystemStatus() {
       freeBytes: freeMemory,
       usedBytes: totalMemory - freeMemory,
     },
-    battery,
-    batteryPercentage: battery.percentage,
-    temperature,
-    temperatureCelsius: temperature.celsius,
+    battery: {
+      percentage: battery.percentage,
+      charging: battery.charging,
+    },
+    temperature: {
+      celsius: temperature.celsius,
+    },
   };
 }
