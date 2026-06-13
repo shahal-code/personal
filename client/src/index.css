@@ -702,46 +702,50 @@ h2 {
 
 .file-table {
   display: grid;
-  gap: 8px;
-}
-
-.file-table__head,
-.file-row {
-  display: grid;
-  grid-template-columns: minmax(240px, 2fr) 120px 120px 170px 1.4fr;
-  gap: 14px;
-  align-items: center;
-}
-
-.file-table--selecting .file-table__head,
-.file-table--selecting .file-row {
-  grid-template-columns: 88px minmax(220px, 2fr) 120px 120px 170px 1.4fr;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
 }
 
 .file-table__head {
-  padding: 0 16px 10px;
-  color: var(--muted);
-  text-transform: uppercase;
-  font-size: 0.75rem;
-  letter-spacing: 0.12em;
+  display: none;
 }
 
 .file-row {
-  padding: 14px 16px;
-  border-radius: 20px;
-  border: 1px solid transparent;
+  min-width: 0;
+  min-height: 190px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(166, 188, 214, 0.12);
   background: rgba(7, 13, 22, 0.66);
-  transition: border-color 0.2s ease, transform 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
 }
 
 .file-row:hover {
-  border-color: rgba(125, 211, 252, 0.18);
-  transform: translateY(-1px);
+  border-color: rgba(125, 211, 252, 0.32);
+  background: rgba(11, 20, 32, 0.9);
+  transform: translateY(-2px);
 }
 
 .file-row--selected {
-  border-color: rgba(56, 189, 248, 0.38);
+  border-color: rgba(56, 189, 248, 0.58);
   background: rgba(14, 116, 144, 0.16);
+}
+
+.file-row > span:not(.file-type) {
+  color: var(--muted);
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-row .file-type {
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
 .select-check {
@@ -759,15 +763,16 @@ h2 {
 }
 
 .file-name {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  display: grid;
+  justify-items: center;
+  gap: 10px;
   border: 0;
   background: transparent;
   color: inherit;
   padding: 0;
-  text-align: left;
+  text-align: center;
   min-width: 0;
+  width: 100%;
 }
 
 .file-name strong,
@@ -775,19 +780,21 @@ h2 {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 .file-name span {
-  font-size: 0.88rem;
+  font-size: 0.76rem;
 }
 
 .file-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 14px;
+  width: 70px;
+  height: 58px;
+  border-radius: 16px;
   display: grid;
   place-items: center;
-  font-size: 0.72rem;
+  font-size: 0.76rem;
   font-weight: 800;
   letter-spacing: 0.08em;
   background: rgba(125, 211, 252, 0.16);
@@ -795,12 +802,38 @@ h2 {
 }
 
 .file-icon--folder {
-  background: rgba(250, 204, 21, 0.14);
+  position: relative;
+  margin-top: 8px;
+  background: linear-gradient(145deg, rgba(250, 204, 21, 0.28), rgba(245, 158, 11, 0.14));
   color: #fde68a;
+}
+
+.file-icon--folder::before {
+  content: "";
+  position: absolute;
+  top: -8px;
+  left: 8px;
+  width: 28px;
+  height: 12px;
+  border-radius: 7px 7px 0 0;
+  background: rgba(250, 204, 21, 0.28);
 }
 
 .file-icon--file {
   background: rgba(56, 189, 248, 0.14);
+}
+
+.file-row .row-actions {
+  margin-top: auto;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.file-row .row-actions .ghost-button {
+  min-width: 0;
+  padding: 7px 5px;
+  font-size: 0.72rem;
 }
 
 .file-type {
@@ -1046,22 +1079,34 @@ h2 {
     line-height: 1.25;
   }
 
-  .file-table__head {
-    display: none;
+  .file-table {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
   }
 
   .file-row {
-    grid-template-columns: 1fr;
-    gap: 10px;
-    padding: 12px;
+    min-height: 170px;
+    gap: 7px;
+    padding: 10px;
+    border-radius: 15px;
   }
 
   .file-name > div:last-child {
     min-width: 0;
+    width: 100%;
   }
 
-  .row-actions {
-    justify-content: flex-start;
+  .file-icon {
+    width: 58px;
+    height: 48px;
+  }
+
+  .file-row .row-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .file-row .row-actions .ghost-button {
+    padding: 6px 4px;
   }
 
   .topbar,
@@ -1149,10 +1194,6 @@ h2 {
   .control-select {
     width: 100%;
     flex-basis: auto;
-  }
-
-  .file-table--selecting .file-row {
-    grid-template-columns: 1fr;
   }
 
   .select-check {

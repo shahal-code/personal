@@ -205,17 +205,39 @@ function cpuSnapshot() {
   );
 }
 
+async function readProcCpuSnapshot() {
+  try {
+    const contents = await fs.readFile("/proc/stat", "utf8");
+    const cpuLine = contents.split("\n").find((line) => line.startsWith("cpu "));
+    if (!cpuLine) {
+      return null;
+    }
+
+    const values = cpuLine.trim().split(/\s+/).slice(1).map(Number);
+    if (values.length < 4 || values.some((value) => !Number.isFinite(value))) {
+      return null;
+    }
+
+    const idle = values[3] + (values[4] || 0);
+    const total = values.reduce((sum, value) => sum + value, 0);
+    return { idle, total };
+  } catch {
+    return null;
+  }
+}
+
 async function readCpuUsage() {
-  const first = cpuSnapshot();
-  await new Promise((resolve) => setTimeout(resolve, 150));
-  const second = cpuSnapshot();
+  const first = (await readProcCpuSnapshot()) || cpuSnapshot();
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  const second = (await readProcCpuSnapshot()) || cpuSnapshot();
   const idle = second.idle - first.idle;
   const total = second.total - first.total;
-  const percentage = total > 0 ? Math.round((1 - idle / total) * 100) : null;
+  const percentage = total > 0 ? Math.round((1 - idle / total) * 1000) / 10 : null;
+  const coreCount = os.cpus().length || os.availableParallelism?.() || null;
 
   return {
     percentage: Number.isFinite(percentage) ? Math.max(0, Math.min(100, percentage)) : null,
-    cores: os.cpus().length,
+    cores: coreCount || null,
   };
 }
 
