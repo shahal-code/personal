@@ -40,6 +40,7 @@ export default function FilePreviewModal({ item, onClose }) {
   const [transcodeStatus, setTranscodeStatus] = useState(null);
   const [hlsModule, setHlsModule] = useState(null);
   const [downloading, setDownloading] = useState(false);
+  const [videoError, setVideoError] = useState(false);
   const previewUrl = resolveUrl(`/preview?path=${encodeURIComponent(item.path)}`);
   const livePreviewUrl = resolveUrl(`/preview/live?path=${encodeURIComponent(item.path)}`);
   const hlsUrl = resolveUrl(`/preview/hls?path=${encodeURIComponent(item.path)}`);
@@ -48,7 +49,7 @@ export default function FilePreviewModal({ item, onClose }) {
     return video.canPlayType("application/vnd.apple.mpegurl");
   }, []);
 
-  const useHls = kind === "video" && transcodeStatus?.hlsReady;
+  const useHls = kind === "video" && transcodeStatus?.hlsReady && !videoError;
   const streamUrl = useHls ? hlsUrl : livePreviewUrl;
 
   useEffect(() => {
@@ -158,7 +159,7 @@ export default function FilePreviewModal({ item, onClose }) {
         hlsRef.current = null;
       }
 
-      videoElement.src = streamUrl;
+      videoElement.src = livePreviewUrl;
       videoElement.load();
       return undefined;
     }
@@ -180,8 +181,13 @@ export default function FilePreviewModal({ item, onClose }) {
         if (data?.fatal) {
           hls.destroy();
           hlsRef.current = null;
-          videoElement.src = streamUrl;
-          videoElement.load();
+          // ✅ fallback to direct stream instead of blank screen
+          setVideoError(true);
+          if (videoRef.current) {
+            videoRef.current.src = livePreviewUrl;
+            videoRef.current.load();
+            videoRef.current.play().catch(() => {});
+          }
           setTranscodeStatus((current) => ({ ...current, hlsReady: false }));
         }
       });
@@ -196,7 +202,29 @@ export default function FilePreviewModal({ item, onClose }) {
 
     videoElement.src = hlsUrl;
     return undefined;
-  }, [kind, hlsModule, hlsUrl, streamUrl, useHls]);
+  }, [kind, hlsModule, hlsUrl, livePreviewUrl, useHls]);
+
+  // ✅ Timeout fallback — if video not loading after 5 seconds, force direct stream
+  useEffect(() => {
+    if (kind !== "video") return undefined;
+
+    const timer = window.setTimeout(() => {
+      const video = videoRef.current;
+      if (video && video.readyState === 0) {
+        console.warn("Video not loading, falling back to direct stream");
+        if (hlsRef.current) {
+          hlsRef.current.destroy();
+          hlsRef.current = null;
+        }
+        setVideoError(true);
+        video.src = livePreviewUrl;
+        video.load();
+        video.play().catch(() => {});
+      }
+    }, 5000);
+
+    return () => window.clearTimeout(timer);
+  }, [kind, livePreviewUrl]);
 
   useEffect(
     () => () => {
@@ -215,6 +243,34 @@ export default function FilePreviewModal({ item, onClose }) {
       await download(`/download?path=${encodeURIComponent(item.path)}`, item.name);
     } finally {
       setDownloading(false);
+    }
+  }
+
+  function handleVideoError(e) {
+    const video = e.currentTarget;
+    // If already on direct stream and still failing, show error
+    if (video.src === livePreviewUrl) {
+      setError("Unable to play this video");
+      return;
+    }
+    // Otherwise fall back to direct stream
+    console.warn("Video error, falling back to direct stream");
+    setVideoError(true);
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+    video.src = livePreviewUrl;
+    video.load();
+    video.play().catch(() => {});
+  }
+
+  function handleVideoStalled() {
+    const video = videoRef.current;
+    if (video && video.src !== livePreviewUrl) {
+      video.src = livePreviewUrl;
+      video.load();
+      video.play().catch(() => {});
     }
   }
 
@@ -243,7 +299,18 @@ export default function FilePreviewModal({ item, onClose }) {
           ) : error ? (
             <div className="error-banner">{error}</div>
           ) : kind === "video" ? (
-            <video ref={videoRef} className="preview-media" controls autoPlay playsInline muted={false} crossOrigin="use-credentials" preload="metadata" />
+            <video
+              ref={videoRef}
+              className="preview-media"
+              controls
+              autoPlay
+              playsInline
+              muted={false}
+              crossOrigin="use-credentials"
+              preload="metadata"
+              onError={handleVideoError}
+              onStalled={handleVideoStalled}
+            />
           ) : kind === "audio" ? (
             <audio className="preview-media preview-media--audio" controls autoPlay src={previewUrl} crossOrigin="use-credentials" />
           ) : kind === "image" ? (
@@ -260,7 +327,15 @@ export default function FilePreviewModal({ item, onClose }) {
         {kind === "video" && transcodeStatus ? (
           <div className="preview-status">
             <span>Playback</span>
-            <strong>{transcodeStatus.status === "ready" ? "HLS ready" : transcodeStatus.status === "processing" ? "Transcoding" : "Direct stream"}</strong>
+            <strong>
+              {videoError
+                ? "Direct stream (fallback)"
+                : transcodeStatus.status === "ready"
+                  ? "HLS ready"
+                  : transcodeStatus.status === "processing"
+                    ? "Transcoding"
+                    : "Direct stream"}
+            </strong>
           </div>
         ) : null}
       </div>
