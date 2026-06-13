@@ -22,7 +22,7 @@ import { getHlsPlaylist, readHlsStatus, rewriteHlsPlaylist, shouldGenerateHls, s
 import { parseJsonBody, parseRelativePath } from "../utils/validation.js";
 
 const router = Router();
-const upload = multer({ dest: TEMP_DIR, limits: { fileSize: 1024 * 1024 * 1024 * 2 } });
+const upload = multer({ dest: TEMP_DIR, limits: { fileSize: 1024 * 1024 * 1024 * 10 } });
 const chunkUpload = express.raw({ type: "application/octet-stream", limit: "128mb" });
 const chunkSessionRoot = path.join(TEMP_DIR, "chunk-sessions");
 const streamUploadRoot = path.join(TEMP_DIR, "stream-uploads");
