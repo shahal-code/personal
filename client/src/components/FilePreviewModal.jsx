@@ -158,6 +158,7 @@ export default function FilePreviewModal({ item, onClose }) {
       }
 
       videoElement.src = streamUrl;
+      videoElement.load();
       return undefined;
     }
 
@@ -165,6 +166,9 @@ export default function FilePreviewModal({ item, onClose }) {
       const hls = new hlsModule({
         enableWorker: true,
         lowLatencyMode: true,
+        xhrSetup(xhr) {
+          xhr.withCredentials = true;
+        },
       });
 
       hls.loadSource(hlsUrl);
@@ -176,6 +180,7 @@ export default function FilePreviewModal({ item, onClose }) {
           hls.destroy();
           hlsRef.current = null;
           videoElement.src = streamUrl;
+          videoElement.load();
           setTranscodeStatus((current) => ({ ...current, hlsReady: false }));
         }
       });
@@ -222,11 +227,11 @@ export default function FilePreviewModal({ item, onClose }) {
           ) : error ? (
             <div className="error-banner">{error}</div>
           ) : kind === "video" ? (
-            <video ref={videoRef} className="preview-media" controls autoPlay playsInline muted={false} crossOrigin="anonymous" />
+            <video ref={videoRef} className="preview-media" controls autoPlay playsInline muted={false} crossOrigin="use-credentials" preload="metadata" />
           ) : kind === "audio" ? (
-            <audio className="preview-media preview-media--audio" controls autoPlay src={previewUrl} crossOrigin="anonymous" />
+            <audio className="preview-media preview-media--audio" controls autoPlay src={previewUrl} crossOrigin="use-credentials" />
           ) : kind === "image" ? (
-            <img className="preview-image" src={previewUrl} alt={item.name} crossOrigin="anonymous" />
+            <img className="preview-image" src={previewUrl} alt={item.name} crossOrigin="use-credentials" />
           ) : kind === "pdf" ? (
             <iframe className="preview-embed" title={item.name} src={previewUrl} />
           ) : kind === "text" ? (
