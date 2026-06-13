@@ -325,7 +325,7 @@ router.post("/upload/chunk", chunkUpload, async (req, res) => {
   const finalized = await tryFinalizeChunkSession(sessionPath, destinationAbsolute, totalChunks);
   if (finalized) {
     if (shouldGenerateHls(fileName)) {
-      await startHlsTranscode({
+      startHlsTranscode({
         relativePath: destinationRelative,
         sourcePath: destinationAbsolute,
         fileName,
@@ -380,7 +380,7 @@ router.post("/upload/stream", async (req, res) => {
     await moveFileSafe(tempPath, destinationAbsolute);
 
     if (!fastUpload && shouldGenerateHls(fileName)) {
-      await startHlsTranscode({
+      startHlsTranscode({
         relativePath: destinationRelative,
         sourcePath: destinationAbsolute,
         fileName,

@@ -119,6 +119,7 @@ export default function DashboardPage() {
   const location = useLocation();
   const uploadRef = useRef(null);
   const messageTimerRef = useRef(null);
+  const uploadCompletionRef = useRef(false);
   const [directory, setDirectory] = useState({ items: [], currentPath: "/", parentPath: "/" });
   const [storage, setStorage] = useState(null);
   const [systemStatus, setSystemStatus] = useState(null);
@@ -272,6 +273,7 @@ export default function DashboardPage() {
     setUploadPhase("Uploading");
     setRestoredUpload(null);
     setError("");
+    uploadCompletionRef.current = false;
     const formData = new FormData();
     formData.append("path", uploadPath);
     files.forEach((file) => formData.append("files", file));
@@ -286,6 +288,16 @@ export default function DashboardPage() {
             setUploadFileName(fileName);
           }
           setUploadPhase(progress >= 1 ? "Finalizing" : "Uploading");
+
+          if (progress >= 1 && !uploadCompletionRef.current) {
+            uploadCompletionRef.current = true;
+            setUploading(false);
+            setUploadProgress(100);
+            setUploadPhase("Saving");
+            setMessage(`${files.length} file${files.length > 1 ? "s" : ""} uploaded`);
+            void loadData(uploadPath);
+            void loadSystemStatus();
+          }
         },
       });
 
@@ -315,20 +327,25 @@ export default function DashboardPage() {
         });
       }
 
-      setUploading(false);
-      setUploadProgress(0);
-      setUploadFileName("");
-      setUploadPhase("");
-      setMessage(`${files.length} file${files.length > 1 ? "s" : ""} uploaded`);
-      void loadData(uploadPath);
-      void loadSystemStatus();
+      if (!uploadCompletionRef.current) {
+        setUploading(false);
+        setUploadProgress(0);
+        setUploadFileName("");
+        setUploadPhase("");
+        setMessage(`${files.length} file${files.length > 1 ? "s" : ""} uploaded`);
+        void loadData(uploadPath);
+        void loadSystemStatus();
+      }
     } catch (requestError) {
-      setError(requestError.message || "Upload failed");
+      if (!uploadCompletionRef.current) {
+        setError(requestError.message || "Upload failed");
+      }
     } finally {
       setUploading(false);
       setUploadProgress(0);
       setUploadFileName("");
       setUploadPhase("");
+      uploadCompletionRef.current = false;
       clearUploadSession();
       event.target.value = "";
     }
