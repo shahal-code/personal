@@ -74,10 +74,16 @@ async function readBatteryAndTemperatureFromDumpsys() {
   }
 
   const levelMatch = output.match(/^\s*level:\s*(\d+)/im);
+  const presentMatch = output.match(/^\s*present:\s*(true|false)/im);
   const statusMatch = output.match(/^\s*status:\s*(\d+)/im);
   const temperatureMatch = output.match(/^\s*temperature:\s*(-?\d+)/im);
 
   if (!levelMatch && !temperatureMatch) {
+    return null;
+  }
+
+  const present = presentMatch ? presentMatch[1] === "true" : null;
+  if (present === false) {
     return null;
   }
 
@@ -92,7 +98,10 @@ async function readBatteryAndTemperatureFromDumpsys() {
       source: "dumpsys battery",
     },
     temperature: {
-      celsius: Number.isFinite(temperatureTenths) ? Number((temperatureTenths / 10).toFixed(1)) : null,
+      celsius:
+        Number.isFinite(temperatureTenths) && temperatureTenths > 0
+          ? Number((temperatureTenths / 10).toFixed(1))
+          : null,
       source: "dumpsys battery",
     },
   };
@@ -102,11 +111,6 @@ async function readBatteryInfo() {
   const termux = await readBatteryAndTemperatureFromTermux();
   if (termux) {
     return termux.battery;
-  }
-
-  const dumpsys = await readBatteryAndTemperatureFromDumpsys();
-  if (dumpsys) {
-    return dumpsys.battery;
   }
 
   const output = await runCommand(
@@ -138,11 +142,6 @@ async function readTemperatureInfo() {
   const termux = await readBatteryAndTemperatureFromTermux();
   if (termux) {
     return termux.temperature;
-  }
-
-  const dumpsys = await readBatteryAndTemperatureFromDumpsys();
-  if (dumpsys) {
-    return dumpsys.temperature;
   }
 
   const output = await runCommand(

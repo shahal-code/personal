@@ -49,12 +49,12 @@ export default function StoragePanel({ storage, systemStatus }) {
         <article className="status-card">
           <span>Battery</span>
           <strong>{formatPercent(batteryPercent)}</strong>
-          <p>{batteryState}</p>
+          <p>{batteryPercent == null ? "Install Termux:API for live battery stats" : batteryState}</p>
         </article>
         <article className="status-card">
           <span>Temperature</span>
           <strong>{formatTemperature(temperature)}</strong>
-          <p>{systemStatus?.temperature?.source || "Best-effort sensor reading"}</p>
+          <p>{temperature == null ? "Install Termux:API for live temperature" : systemStatus?.temperature?.source || "Best-effort sensor reading"}</p>
         </article>
         <article className="status-card">
           <span>Memory</span>
