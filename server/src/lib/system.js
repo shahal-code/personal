@@ -226,17 +226,48 @@ async function readProcCpuSnapshot() {
   }
 }
 
+async function readTopCpuPercentage() {
+  const output = await runCommand("top", ["-b", "-n", "1"]);
+  if (!output) {
+    return null;
+  }
+
+  const procpsIdle = output.match(/Cpu\(s\).*?([\d.]+)\s*id\b/i);
+  if (procpsIdle) {
+    const idle = Number(procpsIdle[1]);
+    return Number.isFinite(idle) ? Math.max(0, Math.min(100, 100 - idle)) : null;
+  }
+
+  const androidCpu = output.match(/([\d.]+)%cpu\b[^\n]*?([\d.]+)%idle\b/i);
+  if (androidCpu) {
+    const total = Number(androidCpu[1]);
+    const idle = Number(androidCpu[2]);
+    if (Number.isFinite(total) && total > 0 && Number.isFinite(idle)) {
+      return Math.max(0, Math.min(100, ((total - idle) / total) * 100));
+    }
+  }
+
+  return null;
+}
+
 async function readCpuUsage() {
   const first = (await readProcCpuSnapshot()) || cpuSnapshot();
-  await new Promise((resolve) => setTimeout(resolve, 500));
+  await new Promise((resolve) => setTimeout(resolve, 1000));
   const second = (await readProcCpuSnapshot()) || cpuSnapshot();
   const idle = second.idle - first.idle;
   const total = second.total - first.total;
-  const percentage = total > 0 ? Math.round((1 - idle / total) * 1000) / 10 : null;
+  let percentage = total > 0 ? (1 - idle / total) * 100 : null;
+
+  if (!Number.isFinite(percentage) || total <= 0) {
+    percentage = await readTopCpuPercentage();
+  }
+
   const coreCount = os.cpus().length || os.availableParallelism?.() || null;
 
   return {
-    percentage: Number.isFinite(percentage) ? Math.max(0, Math.min(100, percentage)) : null,
+    percentage: Number.isFinite(percentage)
+      ? Math.round(Math.max(0, Math.min(100, percentage)) * 10) / 10
+      : null,
     cores: coreCount || null,
   };
 }

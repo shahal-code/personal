@@ -29,6 +29,10 @@ export default function StoragePanel({ storage, systemStatus, transferStatus }) 
       ? fileTypeEntries.map(([extension, count]) => `${extension.toUpperCase()} ${count}`).join(" · ")
       : "No files";
   const network = systemStatus?.network;
+  const cpuPercentage = Number(systemStatus?.cpu?.percentage);
+  const formattedCpuPercentage = Number.isFinite(cpuPercentage)
+    ? `${Math.max(0, Math.min(100, cpuPercentage)).toFixed(1)}%`
+    : "N/A";
 
   return (
     <section className="storage-panel">
@@ -123,7 +127,7 @@ export default function StoragePanel({ storage, systemStatus, transferStatus }) 
         </article>
         <article className="status-card">
           <span>CPU usage</span>
-          <strong>{formatPercent(systemStatus?.cpu?.percentage)}</strong>
+          <strong>{formattedCpuPercentage}</strong>
           <p>{systemStatus?.cpu?.cores ? `${systemStatus.cpu.cores} logical cores` : "CPU unavailable"}</p>
         </article>
         <article className="status-card">
