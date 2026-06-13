@@ -1,4 +1,5 @@
-import fs from "node:fs/promises";
+
+  import fs from "node:fs/promises";
 import fsSync from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -102,31 +103,31 @@ async function readSessionMeta(sessionPath) {
   }
 }
 
+// ✅ FIXED — streams chunks directly to disk, no RAM loading
 async function flushContiguousChunks(sessionPath) {
   const livePath = await ensureLiveFile(sessionPath);
   let cursor = await readCursor(sessionPath);
-  const handle = await fs.open(livePath, "a");
 
-  try {
-    while (true) {
-      const chunkName = `${String(cursor).padStart(8, "0")}.part`;
-      const chunkPath = path.join(sessionPath, chunkName);
+  while (true) {
+    const chunkName = `${String(cursor).padStart(8, "0")}.part`;
+    const chunkPath = path.join(sessionPath, chunkName);
 
-      try {
-        const chunkBuffer = await fs.readFile(chunkPath);
-        await handle.write(chunkBuffer);
-        await fs.rm(chunkPath, { force: true });
-        cursor += 1;
-      } catch (error) {
-        if (error?.code === "ENOENT") {
-          break;
-        }
-
-        throw error;
-      }
+    try {
+      await fs.access(chunkPath);
+    } catch (error) {
+      if (error?.code === "ENOENT") break;
+      throw error;
     }
-  } finally {
-    await handle.close();
+
+    try {
+      const readStream = fsSync.createReadStream(chunkPath);
+      const writeStream = fsSync.createWriteStream(livePath, { flags: "a" });
+      await pipeline(readStream, writeStream);
+      await fs.rm(chunkPath, { force: true });
+      cursor += 1;
+    } catch (error) {
+      throw error;
+    }
   }
 
   await writeCursor(sessionPath, cursor);
