@@ -6,7 +6,7 @@ import { STORAGE_ROOT } from "../config/env.js";
 
 const router = Router();
 
-router.use(requireAdmin, noStore);
+router.use("/storage", requireAdmin, noStore);
 
 router.get("/storage", async (req, res) => {
   await ensureDirectory(STORAGE_ROOT);

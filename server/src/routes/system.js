@@ -5,7 +5,7 @@ import { getSystemStatus } from "../lib/system.js";
 
 const router = Router();
 
-router.use(requireAdmin, noStore);
+router.use("/system-status", requireAdmin, noStore);
 
 router.get("/system-status", async (req, res) => {
   const status = await getSystemStatus();

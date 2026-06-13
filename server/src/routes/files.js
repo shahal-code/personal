@@ -265,7 +265,21 @@ async function buildUploadedItem(absolutePath, relativePath) {
   };
 }
 
-router.use(requireAdmin, noStore);
+router.use(
+  [
+    "/files",
+    "/gallery",
+    "/folders",
+    "/upload",
+    "/video",
+    "/download",
+    "/preview",
+    "/delete",
+    "/items",
+  ],
+  requireAdmin,
+  noStore
+);
 
 router.get("/files", async (req, res) => {
   await ensureRootReady();
