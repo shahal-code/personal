@@ -197,7 +197,8 @@ h2 {
 .primary-button,
 .secondary-button,
 .ghost-button,
-.icon-button {
+.icon-button,
+.toggle-button {
   border-radius: 14px;
   border: 1px solid var(--border-strong);
   padding: 12px 16px;
@@ -218,9 +219,21 @@ h2 {
 
 .secondary-button:hover,
 .ghost-button:hover,
-.icon-button:hover {
+.icon-button:hover,
+.toggle-button:hover {
   border-color: rgba(125, 211, 252, 0.45);
   transform: translateY(-1px);
+}
+
+.toggle-button {
+  background: rgba(8, 16, 26, 0.72);
+  color: var(--muted);
+}
+
+.toggle-button--active {
+  color: #dff4ff;
+  border-color: rgba(56, 189, 248, 0.5);
+  background: rgba(56, 189, 248, 0.14);
 }
 
 .ghost-button {

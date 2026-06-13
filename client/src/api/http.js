@@ -277,6 +277,7 @@ export async function uploadFiles(path, options = {}) {
     headers = {},
     signal,
     onProgress,
+    fastUpload = false,
   } = options;
 
   if (!Array.isArray(files) || files.length === 0) {
@@ -319,6 +320,7 @@ export async function uploadFiles(path, options = {}) {
             path: targetPath,
             name: file.name,
             uploadId,
+            fast: fastUpload ? "true" : "false",
           },
           onProgress: (progressEvent) => {
             fileLoaded = progressEvent.loaded || 0;
@@ -358,7 +360,7 @@ export async function uploadFiles(path, options = {}) {
 }
 
 export async function upload(path, options = {}) {
-  const { body, headers = {}, signal, onProgress } = options;
+  const { body, headers = {}, signal, onProgress, fastUpload = false } = options;
 
   if (!(body instanceof FormData)) {
     return request(path, options);
@@ -366,7 +368,7 @@ export async function upload(path, options = {}) {
 
   const files = Array.from(body.getAll("files"));
   const targetPath = typeof body.get("path") === "string" ? body.get("path") : "";
-  return uploadFiles(path, { files, targetPath, headers, signal, onProgress });
+  return uploadFiles(path, { files, targetPath, headers, signal, onProgress, fastUpload });
 }
 
 export async function download(path, fallbackName) {

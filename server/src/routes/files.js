@@ -351,6 +351,7 @@ router.post("/upload/stream", async (req, res) => {
   const targetPath = parseRelativePath(req.query.path || "");
   const fileName = ensureSafeName(req.query.name || "");
   const uploadId = ensureSafeName(req.query.uploadId || randomUUID());
+  const fastUpload = req.query.fast === "true";
   const destinationRelative = joinRelativePath(targetPath, fileName);
   const destinationAbsolute = resolveStoragePath(STORAGE_ROOT, destinationRelative).absolutePath;
   const tempPath = path.join(streamUploadRoot, `${uploadId}.partial`);
@@ -380,7 +381,7 @@ router.post("/upload/stream", async (req, res) => {
     await pipeline(req, writeStream);
     await moveFileSafe(tempPath, destinationAbsolute);
 
-    if (shouldGenerateHls(fileName)) {
+    if (!fastUpload && shouldGenerateHls(fileName)) {
       await startHlsTranscode({
         relativePath: destinationRelative,
         sourcePath: destinationAbsolute,

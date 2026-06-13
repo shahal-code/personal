@@ -7,6 +7,7 @@ import Modal from "../components/Modal.jsx";
 import FilePreviewModal from "../components/FilePreviewModal.jsx";
 
 const UPLOAD_SESSION_KEY = "phonecloud.uploadSession";
+const UPLOAD_MODE_KEY = "phonecloud.uploadMode";
 
 function readUploadSession() {
   try {
@@ -28,6 +29,23 @@ function writeUploadSession(payload) {
 function clearUploadSession() {
   try {
     window.sessionStorage.removeItem(UPLOAD_SESSION_KEY);
+  } catch {
+    // Ignore storage errors.
+  }
+}
+
+function readUploadMode() {
+  try {
+    const raw = window.localStorage.getItem(UPLOAD_MODE_KEY);
+    return raw ? JSON.parse(raw) : { fastUploadMode: true };
+  } catch {
+    return { fastUploadMode: true };
+  }
+}
+
+function writeUploadMode(payload) {
+  try {
+    window.localStorage.setItem(UPLOAD_MODE_KEY, JSON.stringify(payload));
   } catch {
     // Ignore storage errors.
   }
@@ -100,6 +118,7 @@ export default function DashboardPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const uploadRef = useRef(null);
+  const messageTimerRef = useRef(null);
   const [directory, setDirectory] = useState({ items: [], currentPath: "/", parentPath: "/" });
   const [storage, setStorage] = useState(null);
   const [systemStatus, setSystemStatus] = useState(null);
@@ -109,6 +128,7 @@ export default function DashboardPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadFileName, setUploadFileName] = useState("");
   const [restoredUpload, setRestoredUpload] = useState(null);
+  const [fastUploadMode, setFastUploadMode] = useState(true);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [renameTarget, setRenameTarget] = useState(null);
@@ -178,6 +198,36 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
+    const savedMode = readUploadMode();
+    setFastUploadMode(savedMode.fastUploadMode !== false);
+  }, []);
+
+  useEffect(() => {
+    writeUploadMode({ fastUploadMode });
+  }, [fastUploadMode]);
+
+  useEffect(() => {
+    if (!message) {
+      return undefined;
+    }
+
+    if (messageTimerRef.current) {
+      window.clearTimeout(messageTimerRef.current);
+    }
+
+    messageTimerRef.current = window.setTimeout(() => {
+      setMessage("");
+    }, 3500);
+
+    return () => {
+      if (messageTimerRef.current) {
+        window.clearTimeout(messageTimerRef.current);
+        messageTimerRef.current = null;
+      }
+    };
+  }, [message]);
+
+  useEffect(() => {
     if (!uploading) {
       return undefined;
     }
@@ -225,6 +275,7 @@ export default function DashboardPage() {
     try {
       const result = await upload("/upload", {
         body: formData,
+        fastUpload: fastUploadMode,
         onProgress: ({ progress, fileName }) => {
           setUploadProgress(Math.round(progress * 100));
           if (fileName) {
@@ -400,6 +451,16 @@ export default function DashboardPage() {
             <button className="secondary-button" type="button" onClick={() => setFolderModalOpen(true)} disabled={busy}>
               New folder
             </button>
+            <button
+              className={`toggle-button ${fastUploadMode ? "toggle-button--active" : ""}`}
+              type="button"
+              onClick={() => setFastUploadMode((current) => !current)}
+              disabled={busy || uploading}
+              aria-pressed={fastUploadMode}
+              title={fastUploadMode ? "Fast upload mode on" : "Live preview mode on"}
+            >
+              {fastUploadMode ? "Fast upload" : "Live preview"}
+            </button>
             <button className="primary-button" type="button" onClick={() => uploadRef.current?.click()} disabled={busy || uploading}>
               Upload files
             </button>
@@ -415,6 +476,11 @@ export default function DashboardPage() {
               <span>{uploadFileName ? `Uploading ${uploadFileName}` : "Uploading files"}</span>
               <strong>{uploadProgress}%</strong>
             </div>
+            <p className="upload-panel__copy">
+              {fastUploadMode
+                ? "Fast upload mode is on. HLS/extra preview work is skipped until after upload."
+                : "Live preview mode is on. Upload may be slower because the server keeps preview support active."}
+            </p>
             <div className="progress-track">
               <div className="progress-fill progress-fill--upload" style={{ width: `${uploadProgress}%` }} />
             </div>
