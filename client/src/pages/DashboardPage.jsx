@@ -163,6 +163,7 @@ export default function DashboardPage() {
   const [systemStatus, setSystemStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [galleryLoading, setGalleryLoading] = useState(true);
+  const [galleryOpen, setGalleryOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -339,7 +340,7 @@ export default function DashboardPage() {
           setUploadPhase(
             Number.isInteger(chunkIndex) && Number.isInteger(totalChunks)
               ? `${phase || "Uploading"} ${chunkIndex + 1}/${totalChunks}`
-              : progress >= 1
+              : progress >= 0.995
                 ? "Saving"
                 : "Uploading"
           );
@@ -594,26 +595,30 @@ export default function DashboardPage() {
           </section>
         ) : null}
 
-        <section className="gallery-panel">
+        <section className={`gallery-panel ${galleryOpen ? "gallery-panel--open" : ""}`}>
           <div className="gallery-panel__header">
             <div>
               <p className="eyebrow">Gallery</p>
               <h2>Open everything with thumbnails</h2>
             </div>
-            <span>{gallery.items.length} item{gallery.items.length === 1 ? "" : "s"}</span>
+            <button className="secondary-button" type="button" onClick={() => setGalleryOpen((current) => !current)}>
+              {galleryOpen ? "Hide gallery" : `Open gallery (${gallery.items.length})`}
+            </button>
           </div>
 
-          {galleryLoading ? (
-            <div className="empty-state">Loading gallery...</div>
-          ) : galleryItems.length === 0 ? (
-            <div className="empty-state">No gallery items yet.</div>
-          ) : (
-            <div className="gallery-grid">
-              {galleryItems.map((item) => (
-                <GalleryCard key={item.path} item={item} onOpen={() => openItem(item)} />
-              ))}
-            </div>
-          )}
+          {galleryOpen ? (
+            galleryLoading ? (
+              <div className="empty-state">Loading gallery...</div>
+            ) : galleryItems.length === 0 ? (
+              <div className="empty-state">No gallery items yet.</div>
+            ) : (
+              <div className="gallery-grid">
+                {galleryItems.map((item) => (
+                  <GalleryCard key={item.path} item={item} onOpen={() => openItem(item)} />
+                ))}
+              </div>
+            )
+          ) : null}
         </section>
 
         <section className="directory-panel">

@@ -359,6 +359,10 @@ h2 {
   font-weight: 700;
 }
 
+.gallery-panel:not(.gallery-panel--open) .gallery-panel__header {
+  margin-bottom: 0;
+}
+
 .gallery-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));

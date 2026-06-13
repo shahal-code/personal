@@ -7,7 +7,8 @@ function normalizeError(message, status, details) {
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
 const CHUNK_SIZE = 16 * 1024 * 1024;
-const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024; // files above 100MB use chunked upload
+const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024;
+const FORCE_CHUNK_UPLOAD = import.meta.env.VITE_FORCE_CHUNK_UPLOAD === "true";
 
 function buildUrl(path) {
   if (/^https?:\/\//i.test(path)) {
@@ -410,9 +411,9 @@ export async function uploadFiles(path, options = {}) {
     let payload;
     let lastError = null;
     const maxRetries = 2;
-    const isLargeFile = file.size > LARGE_FILE_THRESHOLD;
+    const useChunkedUpload = FORCE_CHUNK_UPLOAD && file.size > LARGE_FILE_THRESHOLD;
 
-    if (isLargeFile) {
+    if (useChunkedUpload) {
       // Large file → chunked upload (bypasses Cloudflare 100MB limit)
       try {
         await sendChunked(path, file, {
