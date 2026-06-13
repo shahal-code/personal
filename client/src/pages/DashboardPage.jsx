@@ -67,6 +67,7 @@ export default function DashboardPage() {
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadFileName, setUploadFileName] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [renameTarget, setRenameTarget] = useState(null);
@@ -134,6 +135,7 @@ export default function DashboardPage() {
 
     setUploading(true);
     setUploadProgress(0);
+    setUploadFileName("");
     setError("");
     const formData = new FormData();
     formData.append("path", directory.currentPath === "/" ? "" : directory.currentPath.replace(/^\/+/, ""));
@@ -142,8 +144,11 @@ export default function DashboardPage() {
     try {
       await upload("/upload", {
         body: formData,
-        onProgress: ({ progress }) => {
+        onProgress: ({ progress, fileName }) => {
           setUploadProgress(Math.round(progress * 100));
+          if (fileName) {
+            setUploadFileName(fileName);
+          }
         },
       });
       await loadData(directory.currentPath === "/" ? "" : directory.currentPath.replace(/^\/+/, ""));
@@ -154,6 +159,7 @@ export default function DashboardPage() {
     } finally {
       setUploading(false);
       setUploadProgress(0);
+      setUploadFileName("");
       event.target.value = "";
     }
   }
@@ -294,7 +300,7 @@ export default function DashboardPage() {
         {uploading ? (
           <section className="upload-panel" aria-live="polite">
             <div className="upload-panel__header">
-              <span>Uploading files</span>
+              <span>{uploadFileName ? `Uploading ${uploadFileName}` : "Uploading files"}</span>
               <strong>{uploadProgress}%</strong>
             </div>
             <div className="progress-track">

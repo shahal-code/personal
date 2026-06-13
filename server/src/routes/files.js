@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import express, { Router } from "express";
 import multer from "multer";
-import { Router } from "express";
 import { STORAGE_ROOT, TEMP_DIR } from "../config/env.js";
 import { requireAdmin } from "../middleware/auth.js";
 import {
@@ -18,6 +18,7 @@ import { parseJsonBody, parseRelativePath } from "../utils/validation.js";
 
 const router = Router();
 const upload = multer({ dest: TEMP_DIR, limits: { fileSize: 1024 * 1024 * 1024 * 2 } });
+const chunkUpload = express.raw({ type: "application/octet-stream", limit: "16mb" });
 
 async function ensureRootReady() {
   await ensureDirectory(STORAGE_ROOT);
@@ -95,6 +96,68 @@ router.post("/upload", upload.array("files"), async (req, res) => {
   return res.status(201).json({
     message: "Upload complete",
     uploaded,
+  });
+});
+
+router.post("/upload/chunk", chunkUpload, async (req, res) => {
+  await ensureRootReady();
+
+  const targetPath = parseRelativePath(req.query.path || "");
+  const fileName = ensureSafeName(req.query.name || "");
+  const uploadId = ensureSafeName(req.query.uploadId || "");
+  const chunkIndex = Number(req.query.chunkIndex);
+  const totalChunks = Number(req.query.totalChunks);
+  const isFinalChunk = req.query.final === "true";
+
+  if (!Number.isInteger(chunkIndex) || chunkIndex < 0) {
+    return res.status(400).json({ message: "Invalid chunk index" });
+  }
+
+  if (!Number.isInteger(totalChunks) || totalChunks <= 0) {
+    return res.status(400).json({ message: "Invalid chunk count" });
+  }
+
+  if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+    return res.status(400).json({ message: "Chunk body is required" });
+  }
+
+  const destinationRelative = joinRelativePath(targetPath, fileName);
+  const destinationAbsolute = resolveStoragePath(STORAGE_ROOT, destinationRelative).absolutePath;
+  const tempName = `.${fileName}.upload-${uploadId}.part`;
+  const tempRelative = joinRelativePath(targetPath, tempName);
+  const tempAbsolute = resolveStoragePath(STORAGE_ROOT, tempRelative).absolutePath;
+
+  if (chunkIndex === 0 && (await fileExists(STORAGE_ROOT, destinationRelative))) {
+    return res.status(409).json({ message: `File already exists: ${fileName}` });
+  }
+
+  await fs.mkdir(path.dirname(tempAbsolute), { recursive: true });
+
+  if (chunkIndex === 0) {
+    await fs.rm(tempAbsolute, { force: true });
+  }
+
+  await fs.appendFile(tempAbsolute, req.body);
+
+  if (!isFinalChunk) {
+    return res.status(202).json({
+      message: "Chunk received",
+      uploadId,
+      chunkIndex,
+    });
+  }
+
+  await fs.mkdir(path.dirname(destinationAbsolute), { recursive: true });
+  await fs.rename(tempAbsolute, destinationAbsolute);
+
+  return res.status(201).json({
+    message: "Upload complete",
+    uploaded: [
+      {
+        name: fileName,
+        path: destinationRelative,
+      },
+    ],
   });
 });
 

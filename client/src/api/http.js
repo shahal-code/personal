@@ -79,17 +79,32 @@ export async function request(path, options = {}) {
   return payload;
 }
 
-export async function upload(path, options = {}) {
-  const { body, headers = {}, signal, onProgress } = options;
+function buildQueryString(params) {
+  const query = new URLSearchParams();
 
-  if (!(body instanceof FormData)) {
-    return request(path, options);
-  }
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") {
+      query.set(key, String(value));
+    }
+  });
+
+  const result = query.toString();
+  return result ? `?${result}` : "";
+}
+
+function sendChunk(path, blob, options = {}) {
+  const { headers = {}, signal, onProgress, query = {} } = options;
 
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", buildUrl(path), true);
+    xhr.open("POST", buildUrl(`${path}${buildQueryString(query)}`), true);
     xhr.withCredentials = true;
+    xhr.responseType = "text";
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+
+    Object.entries(headers).forEach(([key, value]) => {
+      xhr.setRequestHeader(key, value);
+    });
 
     if (signal) {
       if (signal.aborted) {
@@ -107,10 +122,6 @@ export async function upload(path, options = {}) {
         { once: true }
       );
     }
-
-    Object.entries(headers).forEach(([key, value]) => {
-      xhr.setRequestHeader(key, value);
-    });
 
     xhr.upload.onprogress = (event) => {
       if (typeof onProgress === "function" && event.lengthComputable) {
@@ -148,8 +159,96 @@ export async function upload(path, options = {}) {
       reject(normalizeError("Upload cancelled", xhr.status || 0));
     };
 
-    xhr.send(body);
+    xhr.send(blob);
   });
+}
+
+export async function uploadFiles(path, options = {}) {
+  const { files = [], targetPath = "", headers = {}, signal, onProgress, chunkSize = 8 * 1024 * 1024 } = options;
+
+  if (!Array.isArray(files) || files.length === 0) {
+    return { uploaded: [] };
+  }
+
+  const totalBytes = files.reduce((sum, file) => sum + Number(file?.size || 0), 0);
+  let uploadedBytes = 0;
+  const uploaded = [];
+
+  for (const file of files) {
+    const uploadId = crypto.randomUUID();
+    const totalChunks = Math.max(1, Math.ceil(file.size / chunkSize));
+
+    for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
+      const start = chunkIndex * chunkSize;
+      const end = Math.min(file.size, start + chunkSize);
+      const chunk = file.slice(start, end);
+      const chunkProgressBase = uploadedBytes;
+
+      const payload = await sendChunk(path, chunk, {
+        headers,
+        signal,
+        query: {
+          path: targetPath,
+          name: file.name,
+          uploadId,
+          chunkIndex,
+          totalChunks,
+          final: chunkIndex === totalChunks - 1 ? "true" : "false",
+        },
+        onProgress: (progressEvent) => {
+          if (typeof onProgress !== "function") {
+            return;
+          }
+
+          const currentLoaded = progressEvent.loaded || 0;
+          const chunkTotal = progressEvent.total || chunk.size || 0;
+          const overallLoaded = Math.min(totalBytes, chunkProgressBase + currentLoaded);
+          const overallProgress = totalBytes > 0 ? overallLoaded / totalBytes : 0;
+
+          onProgress({
+            loaded: overallLoaded,
+            total: totalBytes,
+            progress: overallProgress,
+            fileName: file.name,
+            chunkIndex,
+            totalChunks,
+            chunkProgress: chunkTotal > 0 ? currentLoaded / chunkTotal : 0,
+          });
+        },
+      });
+
+      if (payload?.uploaded?.length) {
+        uploaded.push(...payload.uploaded);
+      }
+
+      uploadedBytes = Math.min(totalBytes, uploadedBytes + chunk.size);
+      if (typeof onProgress === "function") {
+        onProgress({
+          loaded: uploadedBytes,
+          total: totalBytes,
+          progress: totalBytes > 0 ? uploadedBytes / totalBytes : 0,
+          fileName: file.name,
+          chunkIndex,
+          totalChunks,
+          chunkProgress: 1,
+        });
+      }
+    }
+  }
+
+  return { uploaded };
+}
+
+export async function upload(path, options = {}) {
+  const { body, headers = {}, signal, onProgress } = options;
+
+  if (!(body instanceof FormData)) {
+    return request(path, options);
+  }
+
+  const files = Array.from(body.getAll("files"));
+  const targetPath = typeof body.get("path") === "string" ? body.get("path") : "";
+  return uploadFiles(path, { files, targetPath, headers, signal, onProgress });
 }
 
 export async function download(path, fallbackName) {
