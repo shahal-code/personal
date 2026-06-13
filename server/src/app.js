@@ -68,6 +68,14 @@ export async function createApp() {
     await fs.access(clientDist);
     app.use(express.static(clientDist, { index: false, maxAge: "1h" }));
     app.get(/.*/, async (req, res) => {
+      if (
+        ["/preview", "/video", "/download", "/files", "/folders", "/upload", "/delete", "/items", "/storage", "/system-status"].some(
+          (prefix) => req.path === prefix || req.path.startsWith(`${prefix}/`)
+        )
+      ) {
+        return res.status(404).json({ message: "API route not found" });
+      }
+
       return res.sendFile(path.join(clientDist, "index.html"));
     });
   } catch {

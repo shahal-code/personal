@@ -34,6 +34,7 @@ export default function FilePreviewModal({ item, onClose }) {
   const kind = useMemo(() => getPreviewKind(item), [item]);
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
+  const activeVideoUrlRef = useRef("");
   const [loading, setLoading] = useState(kind === "text");
   const [error, setError] = useState("");
   const [text, setText] = useState("");
@@ -42,14 +43,14 @@ export default function FilePreviewModal({ item, onClose }) {
   const [downloading, setDownloading] = useState(false);
   const [videoError, setVideoError] = useState(false);
   const previewUrl = resolveUrl(`/preview?path=${encodeURIComponent(item.path)}`);
-  const livePreviewUrl = resolveUrl(`/preview/live?path=${encodeURIComponent(item.path)}`);
+  const directVideoUrl = previewUrl;
   const hlsUrl = resolveUrl(`/preview/hls?path=${encodeURIComponent(item.path)}`);
   const supportsNativeHls = useMemo(() => {
     const video = document.createElement("video");
     return video.canPlayType("application/vnd.apple.mpegurl");
   }, []);
 
-  const useHls = kind === "video" && transcodeStatus?.hlsReady && !videoError;
+  const useHls = false;
 
   useEffect(() => {
     setVideoError(false);
@@ -129,7 +130,7 @@ export default function FilePreviewModal({ item, onClose }) {
   }, [item.path, kind]);
 
   useEffect(() => {
-    if (kind !== "video" || !transcodeStatus?.hlsReady || hlsModule) {
+    if (kind !== "video" || !useHls || !transcodeStatus?.hlsReady || hlsModule) {
       return undefined;
     }
 
@@ -145,7 +146,7 @@ export default function FilePreviewModal({ item, onClose }) {
     return () => {
       active = false;
     };
-  }, [kind, transcodeStatus?.hlsReady, hlsModule]);
+  }, [kind, transcodeStatus?.hlsReady, hlsModule, useHls]);
 
   useEffect(() => {
     if (kind !== "video") {
@@ -163,19 +164,22 @@ export default function FilePreviewModal({ item, onClose }) {
         hlsRef.current = null;
       }
 
-      videoElement.src = livePreviewUrl;
+      activeVideoUrlRef.current = directVideoUrl;
+      videoElement.src = directVideoUrl;
       videoElement.load();
       return undefined;
     }
 
     if (supportsNativeHls) {
+      activeVideoUrlRef.current = hlsUrl;
       videoElement.src = hlsUrl;
       videoElement.load();
       return undefined;
     }
 
     if (!hlsModule) {
-      videoElement.src = livePreviewUrl;
+      activeVideoUrlRef.current = directVideoUrl;
+      videoElement.src = directVideoUrl;
       videoElement.load();
       return undefined;
     }
@@ -200,7 +204,8 @@ export default function FilePreviewModal({ item, onClose }) {
           // ✅ fallback to direct stream instead of blank screen
           setVideoError(true);
           if (videoRef.current) {
-            videoRef.current.src = livePreviewUrl;
+            activeVideoUrlRef.current = directVideoUrl;
+            videoRef.current.src = directVideoUrl;
             videoRef.current.load();
             videoRef.current.play().catch(() => {});
           }
@@ -216,10 +221,11 @@ export default function FilePreviewModal({ item, onClose }) {
       };
     }
 
-    videoElement.src = livePreviewUrl;
+    activeVideoUrlRef.current = directVideoUrl;
+    videoElement.src = directVideoUrl;
     videoElement.load();
     return undefined;
-  }, [kind, hlsModule, hlsUrl, livePreviewUrl, supportsNativeHls, useHls]);
+  }, [directVideoUrl, kind, hlsModule, hlsUrl, supportsNativeHls, useHls]);
 
   // ✅ Timeout fallback — if video not loading after 5 seconds, force direct stream
   useEffect(() => {
@@ -234,14 +240,15 @@ export default function FilePreviewModal({ item, onClose }) {
           hlsRef.current = null;
         }
         setVideoError(true);
-        video.src = livePreviewUrl;
+        activeVideoUrlRef.current = directVideoUrl;
+        video.src = directVideoUrl;
         video.load();
         video.play().catch(() => {});
       }
     }, 5000);
 
     return () => window.clearTimeout(timer);
-  }, [kind, livePreviewUrl]);
+  }, [directVideoUrl, kind]);
 
   useEffect(
     () => () => {
@@ -266,7 +273,7 @@ export default function FilePreviewModal({ item, onClose }) {
   function handleVideoError(e) {
     const video = e.currentTarget;
     // If already on direct stream and still failing, show error
-    if (video.src === livePreviewUrl) {
+    if (activeVideoUrlRef.current === directVideoUrl) {
       setError("Unable to play this video");
       return;
     }
@@ -277,15 +284,17 @@ export default function FilePreviewModal({ item, onClose }) {
       hlsRef.current.destroy();
       hlsRef.current = null;
     }
-    video.src = livePreviewUrl;
+    activeVideoUrlRef.current = directVideoUrl;
+    video.src = directVideoUrl;
     video.load();
     video.play().catch(() => {});
   }
 
   function handleVideoStalled() {
     const video = videoRef.current;
-    if (video && video.src !== livePreviewUrl) {
-      video.src = livePreviewUrl;
+    if (video && activeVideoUrlRef.current !== directVideoUrl) {
+      activeVideoUrlRef.current = directVideoUrl;
+      video.src = directVideoUrl;
       video.load();
       video.play().catch(() => {});
     }
@@ -348,11 +357,7 @@ export default function FilePreviewModal({ item, onClose }) {
             <strong>
               {videoError
                 ? "Direct stream (fallback)"
-                : transcodeStatus.status === "ready"
-                  ? "HLS ready"
-                  : transcodeStatus.status === "processing"
-                    ? "Transcoding"
-                    : "Direct stream"}
+                : "Direct stream"}
             </strong>
           </div>
         ) : null}
