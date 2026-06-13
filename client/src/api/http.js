@@ -735,33 +735,13 @@ export async function upload(path, options = {}) {
 }
 
 export async function download(path, fallbackName) {
-  const response = await fetch(buildUrl(path), {
-    method: "GET",
-    credentials: "include",
-  });
-
-  if (!response.ok) {
-    const contentType = response.headers.get("content-type") || "";
-    const payload = contentType.includes("application/json")
-      ? await response.json().catch(() => ({}))
-      : await response.text().catch(() => "");
-    const message =
-      typeof payload === "string"
-        ? payload
-        : payload?.message || payload?.error || response.statusText;
-    throw normalizeError(message, response.status, payload);
-  }
-
-  const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = getDownloadName(response, fallbackName || "download");
+  anchor.href = buildUrl(path);
+  anchor.download = fallbackName || "download";
   anchor.rel = "noopener";
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();
-  URL.revokeObjectURL(url);
 }
 
 export async function fetchBlob(path) {
