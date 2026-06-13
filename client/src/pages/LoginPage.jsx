@@ -27,14 +27,6 @@ export default function LoginPage() {
 
   return (
     <main className="auth-shell">
-      <section className="auth-hero">
-        <div className="brand-badge">Phone Cloud</div>
-        <h1>Personal cloud storage on a dedicated Android phone.</h1>
-        <p>
-          Secure admin login, real filesystem browsing, uploads, downloads, and folder management with a dark Drive-like interface.
-        </p>
-      </section>
-
       <form className="auth-card" onSubmit={handleSubmit}>
         <p className="eyebrow">Admin Login</p>
         <h2>Enter credentials</h2>

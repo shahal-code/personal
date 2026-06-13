@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { fetchText, resolveUrl, request } from "../api/http.js";
+import { download, fetchText, resolveUrl, request } from "../api/http.js";
 
 function getPreviewKind(item) {
   const extension = (item?.extension || "").toLowerCase();
@@ -39,6 +39,7 @@ export default function FilePreviewModal({ item, onClose }) {
   const [text, setText] = useState("");
   const [transcodeStatus, setTranscodeStatus] = useState(null);
   const [hlsModule, setHlsModule] = useState(null);
+  const [downloading, setDownloading] = useState(false);
   const previewUrl = resolveUrl(`/preview?path=${encodeURIComponent(item.path)}`);
   const livePreviewUrl = resolveUrl(`/preview/live?path=${encodeURIComponent(item.path)}`);
   const hlsUrl = resolveUrl(`/preview/hls?path=${encodeURIComponent(item.path)}`);
@@ -207,6 +208,16 @@ export default function FilePreviewModal({ item, onClose }) {
     []
   );
 
+  async function handleDownload() {
+    setDownloading(true);
+
+    try {
+      await download(`/download?path=${encodeURIComponent(item.path)}`, item.name);
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   return (
     <div className="modal-backdrop modal-backdrop--wide" role="presentation" onMouseDown={onClose}>
       <div className="modal-card modal-card--preview" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
@@ -216,9 +227,14 @@ export default function FilePreviewModal({ item, onClose }) {
             <h3>{item.name}</h3>
             <p className="modal-subtitle">{item.displayPath}</p>
           </div>
-          <button className="icon-button" type="button" onClick={onClose}>
-            Close
-          </button>
+          <div className="modal-actions">
+            <button className="secondary-button" type="button" onClick={handleDownload} disabled={downloading}>
+              {downloading ? "Downloading..." : "Download"}
+            </button>
+            <button className="icon-button" type="button" onClick={onClose}>
+              Close
+            </button>
+          </div>
         </div>
 
         <div className="preview-frame">
