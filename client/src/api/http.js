@@ -164,7 +164,15 @@ function sendChunk(path, blob, options = {}) {
 }
 
 export async function uploadFiles(path, options = {}) {
-  const { files = [], targetPath = "", headers = {}, signal, onProgress, chunkSize = 8 * 1024 * 1024 } = options;
+  const {
+    files = [],
+    targetPath = "",
+    headers = {},
+    signal,
+    onProgress,
+    chunkSize = 64 * 1024 * 1024,
+    concurrency = 6,
+  } = options;
 
   if (!Array.isArray(files) || files.length === 0) {
     return { uploaded: [] };
@@ -178,63 +186,87 @@ export async function uploadFiles(path, options = {}) {
   for (const file of files) {
     const uploadId = crypto.randomUUID();
     const totalChunks = Math.max(1, Math.ceil(file.size / chunkSize));
+    const chunkStates = Array.from({ length: totalChunks }, () => 0);
+    const maxConcurrentChunks = Math.max(1, Math.min(concurrency, totalChunks));
+    let nextChunkIndex = 0;
+    const fileUploaded = [];
 
-    for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
-      const start = chunkIndex * chunkSize;
-      const end = Math.min(file.size, start + chunkSize);
-      const chunk = file.slice(start, end);
-      const chunkProgressBase = uploadedBytes;
+    function emitProgress(extra = {}) {
+      const fileLoaded = chunkStates.reduce((sum, value) => sum + value, 0);
+      const overallLoaded = Math.min(totalBytes, uploadedBytes + fileLoaded);
 
-      const payload = await sendChunk(chunkPath, chunk, {
-        headers,
-        signal,
-        query: {
-          path: targetPath,
-          name: file.name,
-          uploadId,
-          chunkIndex,
-          totalChunks,
-          final: chunkIndex === totalChunks - 1 ? "true" : "false",
-        },
-        onProgress: (progressEvent) => {
-          if (typeof onProgress !== "function") {
-            return;
-          }
-
-          const currentLoaded = progressEvent.loaded || 0;
-          const chunkTotal = progressEvent.total || chunk.size || 0;
-          const overallLoaded = Math.min(totalBytes, chunkProgressBase + currentLoaded);
-          const overallProgress = totalBytes > 0 ? overallLoaded / totalBytes : 0;
-
-          onProgress({
-            loaded: overallLoaded,
-            total: totalBytes,
-            progress: overallProgress,
-            fileName: file.name,
-            chunkIndex,
-            totalChunks,
-            chunkProgress: chunkTotal > 0 ? currentLoaded / chunkTotal : 0,
-          });
-        },
-      });
-
-      if (payload?.uploaded?.length) {
-        uploaded.push(...payload.uploaded);
-      }
-
-      uploadedBytes = Math.min(totalBytes, uploadedBytes + chunk.size);
       if (typeof onProgress === "function") {
         onProgress({
-          loaded: uploadedBytes,
+          loaded: overallLoaded,
           total: totalBytes,
-          progress: totalBytes > 0 ? uploadedBytes / totalBytes : 0,
+          progress: totalBytes > 0 ? overallLoaded / totalBytes : 0,
           fileName: file.name,
+          ...extra,
+        });
+      }
+    }
+
+    async function uploadNextChunk() {
+      while (true) {
+        const chunkIndex = nextChunkIndex;
+        if (chunkIndex >= totalChunks) {
+          return;
+        }
+
+        nextChunkIndex += 1;
+
+        const start = chunkIndex * chunkSize;
+        const end = Math.min(file.size, start + chunkSize);
+        const chunk = file.slice(start, end);
+
+        const payload = await sendChunk(chunkPath, chunk, {
+          headers,
+          signal,
+          query: {
+            path: targetPath,
+            name: file.name,
+            uploadId,
+            chunkIndex,
+            totalChunks,
+            final: chunkIndex === totalChunks - 1 ? "true" : "false",
+          },
+          onProgress: (progressEvent) => {
+            const currentLoaded = progressEvent.loaded || 0;
+            const chunkTotal = progressEvent.total || chunk.size || 0;
+            chunkStates[chunkIndex] = currentLoaded;
+            emitProgress({
+              chunkIndex,
+              totalChunks,
+              chunkProgress: chunkTotal > 0 ? currentLoaded / chunkTotal : 0,
+            });
+          },
+        });
+
+        chunkStates[chunkIndex] = chunk.size;
+        emitProgress({
           chunkIndex,
           totalChunks,
           chunkProgress: 1,
         });
+
+        if (payload?.uploaded?.length) {
+          fileUploaded.push(...payload.uploaded);
+        }
       }
     }
+
+    await Promise.all(Array.from({ length: maxConcurrentChunks }, () => uploadNextChunk()));
+
+    uploadedBytes = Math.min(totalBytes, uploadedBytes + file.size);
+    if (fileUploaded.length > 0) {
+      uploaded.push(...fileUploaded);
+    }
+
+    emitProgress({
+      chunkIndex: totalChunks - 1,
+      totalChunks,
+      chunkProgress: 1,
+    });
   }
 
   return { uploaded };

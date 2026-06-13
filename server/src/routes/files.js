@@ -18,7 +18,62 @@ import { parseJsonBody, parseRelativePath } from "../utils/validation.js";
 
 const router = Router();
 const upload = multer({ dest: TEMP_DIR, limits: { fileSize: 1024 * 1024 * 1024 * 2 } });
-const chunkUpload = express.raw({ type: "application/octet-stream", limit: "16mb" });
+const chunkUpload = express.raw({ type: "application/octet-stream", limit: "128mb" });
+const chunkSessionRoot = path.join(TEMP_DIR, "chunk-sessions");
+
+async function ensureChunkSession(uploadId) {
+  const sessionPath = path.join(chunkSessionRoot, uploadId);
+  await fs.mkdir(sessionPath, { recursive: true });
+  return sessionPath;
+}
+
+async function cleanupChunkSession(sessionPath) {
+  await fs.rm(sessionPath, { recursive: true, force: true }).catch(() => {});
+}
+
+async function tryFinalizeChunkSession(sessionPath, destinationAbsolute, totalChunks) {
+  const lockPath = path.join(sessionPath, ".finalizing");
+
+  try {
+    await fs.mkdir(lockPath);
+  } catch (error) {
+    if (error?.code === "EEXIST") {
+      return false;
+    }
+
+    throw error;
+  }
+
+  try {
+    const entries = await fs.readdir(sessionPath, { withFileTypes: true });
+    const chunkFiles = entries
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".part"))
+      .sort((left, right) => left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" }));
+
+    if (chunkFiles.length !== totalChunks) {
+      return false;
+    }
+
+    const assemblyPath = `${destinationAbsolute}.uploading`;
+    const handle = await fs.open(assemblyPath, "w");
+
+    try {
+      for (const chunkFile of chunkFiles) {
+        const chunkPath = path.join(sessionPath, chunkFile.name);
+        const chunkBuffer = await fs.readFile(chunkPath);
+        await handle.write(chunkBuffer);
+      }
+    } finally {
+      await handle.close();
+    }
+
+    await fs.rename(assemblyPath, destinationAbsolute);
+    await cleanupChunkSession(sessionPath);
+    return true;
+  } finally {
+    await fs.rm(lockPath, { recursive: true, force: true }).catch(() => {});
+  }
+}
 
 async function ensureRootReady() {
   await ensureDirectory(STORAGE_ROOT);
@@ -123,41 +178,34 @@ router.post("/upload/chunk", chunkUpload, async (req, res) => {
 
   const destinationRelative = joinRelativePath(targetPath, fileName);
   const destinationAbsolute = resolveStoragePath(STORAGE_ROOT, destinationRelative).absolutePath;
-  const tempName = `.${fileName}.upload-${uploadId}.part`;
-  const tempRelative = joinRelativePath(targetPath, tempName);
-  const tempAbsolute = resolveStoragePath(STORAGE_ROOT, tempRelative).absolutePath;
+  const sessionPath = await ensureChunkSession(uploadId);
+  const chunkFileName = `${String(chunkIndex).padStart(8, "0")}.part`;
+  const chunkAbsolute = path.join(sessionPath, chunkFileName);
 
-  if (chunkIndex === 0 && (await fileExists(STORAGE_ROOT, destinationRelative))) {
+  if (await fileExists(STORAGE_ROOT, destinationRelative)) {
+    await cleanupChunkSession(sessionPath);
     return res.status(409).json({ message: `File already exists: ${fileName}` });
   }
 
-  await fs.mkdir(path.dirname(tempAbsolute), { recursive: true });
+  await fs.writeFile(chunkAbsolute, req.body);
 
-  if (chunkIndex === 0) {
-    await fs.rm(tempAbsolute, { force: true });
-  }
-
-  await fs.appendFile(tempAbsolute, req.body);
-
-  if (!isFinalChunk) {
-    return res.status(202).json({
-      message: "Chunk received",
-      uploadId,
-      chunkIndex,
+  const finalized = await tryFinalizeChunkSession(sessionPath, destinationAbsolute, totalChunks);
+  if (finalized) {
+    return res.status(201).json({
+      message: "Upload complete",
+      uploaded: [
+        {
+          name: fileName,
+          path: destinationRelative,
+        },
+      ],
     });
   }
 
-  await fs.mkdir(path.dirname(destinationAbsolute), { recursive: true });
-  await fs.rename(tempAbsolute, destinationAbsolute);
-
-  return res.status(201).json({
-    message: "Upload complete",
-    uploaded: [
-      {
-        name: fileName,
-        path: destinationRelative,
-      },
-    ],
+  return res.status(202).json({
+    message: "Chunk received",
+    uploadId,
+    chunkIndex,
   });
 });
 
