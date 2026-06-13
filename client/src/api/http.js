@@ -173,6 +173,7 @@ export async function uploadFiles(path, options = {}) {
   const totalBytes = files.reduce((sum, file) => sum + Number(file?.size || 0), 0);
   let uploadedBytes = 0;
   const uploaded = [];
+  const chunkPath = `${path.replace(/\/+$/, "")}/chunk`;
 
   for (const file of files) {
     const uploadId = crypto.randomUUID();
@@ -184,7 +185,7 @@ export async function uploadFiles(path, options = {}) {
       const chunk = file.slice(start, end);
       const chunkProgressBase = uploadedBytes;
 
-      const payload = await sendChunk(path, chunk, {
+      const payload = await sendChunk(chunkPath, chunk, {
         headers,
         signal,
         query: {
