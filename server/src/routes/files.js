@@ -111,6 +111,23 @@ router.get("/download", async (req, res) => {
   return res.download(absolutePath, path.basename(absolutePath));
 });
 
+router.get("/preview", async (req, res) => {
+  await ensureRootReady();
+  const relativePath = parseRelativePath(req.query.path || "");
+  const { absolutePath } = resolveStoragePath(STORAGE_ROOT, relativePath);
+  const stats = await fs.stat(absolutePath);
+
+  if (!stats.isFile()) {
+    return res.status(400).json({ message: "Only files can be previewed" });
+  }
+
+  return res.sendFile(absolutePath, {
+    headers: {
+      "Content-Disposition": `inline; filename="${path.basename(absolutePath)}"`,
+    },
+  });
+});
+
 router.delete("/delete", async (req, res) => {
   await ensureRootReady();
   const body = parseJsonBody(req);

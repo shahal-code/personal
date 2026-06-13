@@ -6,6 +6,7 @@ import cors from "cors";
 import helmet from "helmet";
 import authRoutes from "./routes/auth.js";
 import fileRoutes from "./routes/files.js";
+import systemRoutes from "./routes/system.js";
 import storageRoutes from "./routes/storage.js";
 import { CLIENT_ORIGINS, DATA_DIR, STORAGE_ROOT } from "./config/env.js";
 import { assertRequiredEnv } from "./config/env.js";
@@ -56,6 +57,7 @@ export async function createApp() {
 
   app.use(authRoutes);
   app.use(fileRoutes);
+  app.use(systemRoutes);
   app.use(storageRoutes);
 
   const appFile = fileURLToPath(import.meta.url);

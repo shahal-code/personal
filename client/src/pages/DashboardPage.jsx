@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { download, request, formatBytes, formatDate } from "../api/http.js";
+import { request, upload, formatBytes, formatDate } from "../api/http.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import StoragePanel from "../components/StoragePanel.jsx";
 import Modal from "../components/Modal.jsx";
+import FilePreviewModal from "../components/FilePreviewModal.jsx";
 
 function humanFileType(item) {
   if (item.type === "folder") {
@@ -32,7 +33,7 @@ function breadcrumbSegments(currentPath) {
   return crumbs;
 }
 
-function RowActions({ item, onOpen, onRename, onDelete, onDownload }) {
+function RowActions({ item, onOpen, onRename, onDelete }) {
   return (
     <div className="row-actions">
       {item.type === "folder" ? (
@@ -40,8 +41,8 @@ function RowActions({ item, onOpen, onRename, onDelete, onDownload }) {
           Open
         </button>
       ) : (
-        <button className="ghost-button" type="button" onClick={onDownload}>
-          Download
+        <button className="ghost-button" type="button" onClick={onOpen}>
+          Preview
         </button>
       )}
       <button className="ghost-button" type="button" onClick={onRename}>
@@ -61,14 +62,18 @@ export default function DashboardPage() {
   const uploadRef = useRef(null);
   const [directory, setDirectory] = useState({ items: [], currentPath: "/", parentPath: "/" });
   const [storage, setStorage] = useState(null);
+  const [systemStatus, setSystemStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [renameTarget, setRenameTarget] = useState(null);
   const [renameValue, setRenameValue] = useState("");
   const [folderModalOpen, setFolderModalOpen] = useState(false);
   const [folderName, setFolderName] = useState("");
+  const [previewTarget, setPreviewTarget] = useState(null);
 
   const crumbs = useMemo(() => breadcrumbSegments(directory.currentPath), [directory.currentPath]);
 
@@ -97,11 +102,29 @@ export default function DashboardPage() {
     }
   }
 
+  async function loadSystemStatus() {
+    try {
+      const status = await request("/system-status");
+      setSystemStatus(status);
+    } catch {
+      setSystemStatus(null);
+    }
+  }
+
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const path = params.get("path") || "";
     loadData(path);
   }, [location.search]);
+
+  useEffect(() => {
+    loadSystemStatus();
+    const interval = window.setInterval(() => {
+      loadSystemStatus();
+    }, 15000);
+
+    return () => window.clearInterval(interval);
+  }, []);
 
   async function handleUpload(event) {
     const files = Array.from(event.target.files || []);
@@ -109,20 +132,28 @@ export default function DashboardPage() {
       return;
     }
 
-    setBusy(true);
+    setUploading(true);
+    setUploadProgress(0);
     setError("");
     const formData = new FormData();
     formData.append("path", directory.currentPath === "/" ? "" : directory.currentPath.replace(/^\/+/, ""));
     files.forEach((file) => formData.append("files", file));
 
     try {
-      await request("/upload", { method: "POST", body: formData });
+      await upload("/upload", {
+        body: formData,
+        onProgress: ({ progress }) => {
+          setUploadProgress(Math.round(progress * 100));
+        },
+      });
       await loadData(directory.currentPath === "/" ? "" : directory.currentPath.replace(/^\/+/, ""));
       setMessage(`${files.length} file${files.length > 1 ? "s" : ""} uploaded`);
+      loadSystemStatus();
     } catch (requestError) {
       setError(requestError.message || "Upload failed");
     } finally {
-      setBusy(false);
+      setUploading(false);
+      setUploadProgress(0);
       event.target.value = "";
     }
   }
@@ -206,6 +237,15 @@ export default function DashboardPage() {
     navigate("/login", { replace: true });
   }
 
+  function openItem(item) {
+    if (item.type === "folder") {
+      openFolder(item.path);
+      return;
+    }
+
+    setPreviewTarget(item);
+  }
+
   function openFolder(path) {
     const nextPath = path || "";
     navigate(nextPath ? `/app?path=${encodeURIComponent(nextPath)}` : "/app", { replace: true });
@@ -242,14 +282,26 @@ export default function DashboardPage() {
             <button className="secondary-button" type="button" onClick={() => setFolderModalOpen(true)} disabled={busy}>
               New folder
             </button>
-            <button className="primary-button" type="button" onClick={() => uploadRef.current?.click()} disabled={busy}>
+            <button className="primary-button" type="button" onClick={() => uploadRef.current?.click()} disabled={busy || uploading}>
               Upload files
             </button>
             <input ref={uploadRef} className="hidden-input" type="file" multiple onChange={handleUpload} />
           </div>
         </header>
 
-        <StoragePanel storage={storage} />
+        <StoragePanel storage={storage} systemStatus={systemStatus} />
+
+        {uploading ? (
+          <section className="upload-panel" aria-live="polite">
+            <div className="upload-panel__header">
+              <span>Uploading files</span>
+              <strong>{uploadProgress}%</strong>
+            </div>
+            <div className="progress-track">
+              <div className="progress-fill progress-fill--upload" style={{ width: `${uploadProgress}%` }} />
+            </div>
+          </section>
+        ) : null}
 
         <section className="directory-panel">
           <div className="directory-panel__header">
@@ -289,7 +341,7 @@ export default function DashboardPage() {
               </div>
               {directory.items.map((item) => (
                 <article className="file-row" key={item.path}>
-                  <button className="file-name" type="button" onClick={() => item.type === "folder" && openFolder(item.path)}>
+                  <button className="file-name" type="button" onClick={() => openItem(item)}>
                     <div className={`file-icon file-icon--${item.type}`}>
                       {item.type === "folder" ? "DIR" : humanFileType(item).slice(0, 3)}
                     </div>
@@ -303,13 +355,12 @@ export default function DashboardPage() {
                   <span>{formatDate(item.modifiedAt)}</span>
                   <RowActions
                     item={item}
-                    onOpen={() => openFolder(item.path)}
+                    onOpen={() => openItem(item)}
                     onRename={() => {
                       setRenameTarget(item);
                       setRenameValue(item.name);
                     }}
                     onDelete={() => handleDelete(item)}
-                    onDownload={() => download(`/download?path=${encodeURIComponent(item.path)}`, item.name)}
                   />
                 </article>
               ))}
@@ -341,6 +392,8 @@ export default function DashboardPage() {
           confirmLabel="Rename"
         />
       ) : null}
+
+      {previewTarget ? <FilePreviewModal item={previewTarget} onClose={() => setPreviewTarget(null)} /> : null}
     </div>
   );
 }
