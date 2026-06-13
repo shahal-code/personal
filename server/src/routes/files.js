@@ -12,6 +12,7 @@ import {
   createFolder,
   ensureDirectory,
   fileExists,
+  listAllItems,
   listDirectory,
   readEntryStats,
   removeEntry,
@@ -215,6 +216,12 @@ router.get("/files", async (req, res) => {
   return res.json(payload);
 });
 
+router.get("/gallery", async (req, res) => {
+  await ensureRootReady();
+  const payload = await listAllItems(STORAGE_ROOT);
+  return res.json(payload);
+});
+
 router.post("/folders", async (req, res) => {
   await ensureRootReady();
   const body = parseJsonBody(req);
@@ -288,6 +295,7 @@ router.post("/upload/chunk", chunkUpload, async (req, res) => {
   const uploadId = ensureSafeName(req.query.uploadId || "");
   const chunkIndex = Number(req.query.chunkIndex);
   const totalChunks = Number(req.query.totalChunks);
+  const totalSize = Number(req.query.totalSize);
   const isFinalChunk = req.query.final === "true";
   const fastUpload = req.query.fast === "true";
 
@@ -306,26 +314,58 @@ router.post("/upload/chunk", chunkUpload, async (req, res) => {
   const destinationRelative = joinRelativePath(targetPath, fileName);
   const destinationAbsolute = resolveStoragePath(STORAGE_ROOT, destinationRelative).absolutePath;
   const sessionPath = await ensureChunkSession(uploadId);
-  const chunkFileName = `${String(chunkIndex).padStart(8, "0")}.part`;
-  const chunkAbsolute = path.join(sessionPath, chunkFileName);
 
   if (chunkIndex === 0) {
     await writeSessionMeta(sessionPath, {
       destinationRelative,
       fileName,
       totalChunks,
+      totalSize: Number.isFinite(totalSize) ? totalSize : 0,
     });
   }
 
   if (await fileExists(STORAGE_ROOT, destinationRelative)) {
+    if (chunkIndex > 0 && Number.isFinite(totalSize) && totalSize > 0) {
+      const stats = await fs.stat(destinationAbsolute).catch(() => null);
+      if (stats?.isFile() && stats.size === totalSize) {
+        const uploadedItem = await buildUploadedItem(destinationAbsolute, destinationRelative);
+        return res.status(200).json({
+          message: "Upload complete",
+          uploaded: [uploadedItem],
+        });
+      }
+    }
+
     await cleanupChunkSession(sessionPath);
     return res.status(409).json({ message: `File already exists: ${fileName}` });
   }
 
-  await fs.writeFile(chunkAbsolute, req.body);
+  const cursor = await readCursor(sessionPath);
+  if (chunkIndex < cursor) {
+    return res.status(202).json({
+      message: "Chunk already received",
+      uploadId,
+      chunkIndex,
+    });
+  }
 
-  const finalized = await tryFinalizeChunkSession(sessionPath, destinationAbsolute, totalChunks);
-  if (finalized) {
+  if (chunkIndex > cursor) {
+    return res.status(409).json({
+      message: `Expected chunk ${cursor}, received ${chunkIndex}`,
+      uploadId,
+      expectedChunkIndex: cursor,
+    });
+  }
+
+  const livePath = await ensureLiveFile(sessionPath);
+  await fs.appendFile(livePath, req.body);
+  const nextCursor = cursor + 1;
+  await writeCursor(sessionPath, nextCursor);
+
+  if (isFinalChunk && nextCursor === totalChunks) {
+    await moveFileSafe(livePath, destinationAbsolute);
+    await cleanupChunkSession(sessionPath);
+
     if (!fastUpload && shouldGenerateHls(fileName)) {
       startHlsTranscode({
         relativePath: destinationRelative,

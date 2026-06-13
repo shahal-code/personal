@@ -65,6 +65,53 @@ export async function listDirectory(storageRoot, relativePath = "") {
   };
 }
 
+export async function listAllItems(storageRoot) {
+  const items = [];
+
+  async function walk(relativePath = "") {
+    const { absolutePath, relativePath: safeRelative } = resolveStoragePath(storageRoot, relativePath);
+    const entries = await fs.readdir(absolutePath, { withFileTypes: true });
+
+    for (const entry of entries) {
+      if (entry.name.startsWith(".") || entry.name.endsWith(".partial")) {
+        continue;
+      }
+
+      const childRelative = safeRelative ? `${safeRelative}/${entry.name}` : entry.name;
+      const childAbsolute = path.join(absolutePath, entry.name);
+      const stats = await fs.stat(childAbsolute);
+      const isDirectory = entry.isDirectory();
+
+      items.push({
+        name: entry.name,
+        path: childRelative,
+        displayPath: toDisplayPath(childRelative),
+        type: isDirectory ? "folder" : "file",
+        size: isDirectory ? 0 : stats.size,
+        modifiedAt: stats.mtime.toISOString(),
+        createdAt: stats.birthtime.toISOString(),
+        extension: isDirectory ? "" : path.extname(entry.name).slice(1).toLowerCase(),
+      });
+
+      if (isDirectory) {
+        await walk(childRelative);
+      }
+    }
+  }
+
+  await walk("");
+
+  items.sort((left, right) => {
+    if (left.type !== right.type) {
+      return left.type === "folder" ? -1 : 1;
+    }
+
+    return String(left.modifiedAt || "").localeCompare(String(right.modifiedAt || ""));
+  });
+
+  return { items: items.reverse() };
+}
+
 export async function createFolder(storageRoot, relativePath, folderName) {
   const safeName = ensureSafeName(folderName);
   const baseRelative = normalizeRelativePath(relativePath);

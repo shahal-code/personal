@@ -71,6 +71,7 @@ button:disabled {
 .auth-card,
 .storage-panel,
 .directory-panel,
+.gallery-panel,
 .sidebar,
 .metric-card,
 .modal-card {
@@ -312,6 +313,7 @@ h2 {
 
 .topbar,
 .storage-panel,
+.gallery-panel,
 .directory-panel {
   border-radius: 28px;
 }
@@ -336,18 +338,117 @@ h2 {
 }
 
 .storage-panel,
+.gallery-panel,
 .directory-panel {
   padding: 22px;
   background: rgba(12, 20, 31, 0.72);
 }
 
 .storage-panel__header,
+.gallery-panel__header,
 .directory-panel__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 18px;
+}
+
+.gallery-panel__header span {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 14px;
+}
+
+.gallery-card {
+  min-width: 0;
+  border: 1px solid rgba(166, 188, 214, 0.12);
+  border-radius: 22px;
+  padding: 0;
+  overflow: hidden;
+  background: rgba(7, 13, 22, 0.68);
+  color: var(--text);
+  text-align: left;
+  transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
+}
+
+.gallery-card:hover {
+  border-color: rgba(125, 211, 252, 0.32);
+  background: rgba(11, 20, 32, 0.9);
+  transform: translateY(-2px);
+}
+
+.gallery-thumb {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(circle at top left, rgba(56, 189, 248, 0.18), transparent 40%),
+    linear-gradient(145deg, rgba(11, 20, 32, 0.96), rgba(4, 8, 14, 0.96));
+  overflow: hidden;
+}
+
+.gallery-thumb img,
+.gallery-thumb video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  background: #000;
+}
+
+.gallery-thumb__icon {
+  width: 58px;
+  height: 58px;
+  border-radius: 18px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(125, 211, 252, 0.24);
+  background: rgba(125, 211, 252, 0.12);
+  color: #dff4ff;
+  font-size: 0.8rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
+.gallery-thumb__play {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  padding: 6px 9px;
+  border-radius: 999px;
+  background: rgba(4, 8, 14, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #eef7ff;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.gallery-card__body {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+}
+
+.gallery-card__body strong,
+.gallery-card__body span,
+.gallery-card__body small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gallery-card__body span,
+.gallery-card__body small {
+  color: var(--muted);
 }
 
 .storage-grid {
@@ -704,16 +805,45 @@ h2 {
   .sidebar,
   .topbar,
   .storage-panel,
+  .gallery-panel,
   .directory-panel {
     border-radius: 22px;
   }
 
   .storage-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
   }
 
   .status-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  .metric-card,
+  .status-card {
+    padding: 10px;
+    border-radius: 14px;
+    gap: 4px;
+  }
+
+  .metric-card strong {
+    font-size: 1.15rem;
+  }
+
+  .status-card strong {
+    font-size: 1rem;
+  }
+
+  .metric-card span,
+  .status-card span {
+    font-size: 0.68rem;
+  }
+
+  .status-card p {
+    font-size: 0.74rem;
+    line-height: 1.25;
   }
 
   .file-table__head {
@@ -736,6 +866,7 @@ h2 {
 
   .topbar,
   .storage-panel__header,
+  .gallery-panel__header,
   .directory-panel__header,
   .modal-header,
   .modal-actions {
@@ -808,13 +939,52 @@ h2 {
   .sidebar,
   .topbar,
   .storage-panel,
+  .gallery-panel,
   .directory-panel {
     padding: 16px;
   }
 
+  .gallery-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .gallery-card {
+    border-radius: 18px;
+  }
+
+  .gallery-card__body {
+    padding: 10px;
+  }
+
   .storage-grid,
   .status-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .metric-card,
+  .status-card {
+    padding: 9px;
+    border-radius: 12px;
+  }
+
+  .metric-card strong {
+    font-size: 1rem;
+  }
+
+  .status-card strong {
+    font-size: 0.92rem;
+  }
+
+  .metric-card span,
+  .status-card span {
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+  }
+
+  .status-card p {
+    font-size: 0.68rem;
   }
 
   .toolbar,

@@ -6,7 +6,7 @@ function normalizeError(message, status, details) {
 }
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
-const CHUNK_SIZE = 50 * 1024 * 1024; // 50MB per chunk
+const CHUNK_SIZE = 16 * 1024 * 1024;
 const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024; // files above 100MB use chunked upload
 
 function buildUrl(path) {
@@ -331,6 +331,7 @@ async function sendChunked(basePath, file, options = {}) {
             uploadId,
             chunkIndex: i,
             totalChunks,
+            totalSize: file.size,
             final: i === totalChunks - 1 ? "true" : "false",
           },
           onProgress: (e) => {
@@ -340,10 +341,23 @@ async function sendChunked(basePath, file, options = {}) {
                 loaded,
                 total: file.size,
                 progress: file.size > 0 ? loaded / file.size : 0,
+                chunkIndex: i,
+                totalChunks,
+                phase: e.loaded === e.total ? "Saving chunk" : "Uploading",
               });
             }
           },
         });
+        if (typeof onProgress === "function") {
+          onProgress({
+            loaded: totalLoaded + chunk.size,
+            total: file.size,
+            progress: file.size > 0 ? (totalLoaded + chunk.size) / file.size : 0,
+            chunkIndex: i,
+            totalChunks,
+            phase: "Chunk saved",
+          });
+        }
         success = true;
       } catch (err) {
         attempts++;

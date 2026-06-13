@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { request, upload, formatBytes, formatDate } from "../api/http.js";
+import { request, upload, formatBytes, formatDate, resolveUrl } from "../api/http.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import StoragePanel from "../components/StoragePanel.jsx";
 import Modal from "../components/Modal.jsx";
@@ -60,6 +60,14 @@ function humanFileType(item) {
   return extension.toUpperCase();
 }
 
+function isImageItem(item) {
+  return ["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg"].includes((item?.extension || "").toLowerCase());
+}
+
+function isVideoItem(item) {
+  return ["mp4", "m4v", "mov", "webm"].includes((item?.extension || "").toLowerCase());
+}
+
 function sortDirectoryItems(items) {
   return [...items].sort((left, right) => {
     if (left.type !== right.type) {
@@ -113,6 +121,35 @@ function RowActions({ item, onOpen, onRename, onDelete }) {
   );
 }
 
+function GalleryCard({ item, onOpen }) {
+  const previewUrl = item.type === "file" ? resolveUrl(`/preview?path=${encodeURIComponent(item.path)}`) : "";
+  const cardType = item.type === "folder" ? "Folder" : humanFileType(item);
+
+  return (
+    <button className="gallery-card" type="button" onClick={onOpen}>
+      <div className="gallery-thumb">
+        {item.type === "folder" ? (
+          <span className="gallery-thumb__icon">DIR</span>
+        ) : isImageItem(item) ? (
+          <img src={previewUrl} alt={item.name} loading="lazy" />
+        ) : isVideoItem(item) ? (
+          <>
+            <video src={previewUrl} preload="metadata" muted playsInline />
+            <span className="gallery-thumb__play">Play</span>
+          </>
+        ) : (
+          <span className="gallery-thumb__icon">{cardType.slice(0, 3)}</span>
+        )}
+      </div>
+      <div className="gallery-card__body">
+        <strong>{item.name}</strong>
+        <span>{item.displayPath}</span>
+        <small>{item.type === "folder" ? "Folder" : `${cardType} · ${formatBytes(item.size)}`}</small>
+      </div>
+    </button>
+  );
+}
+
 export default function DashboardPage() {
   const { email, signOut, refreshSession } = useAuth();
   const navigate = useNavigate();
@@ -121,9 +158,11 @@ export default function DashboardPage() {
   const messageTimerRef = useRef(null);
   const uploadCompletionRef = useRef(false);
   const [directory, setDirectory] = useState({ items: [], currentPath: "/", parentPath: "/" });
+  const [gallery, setGallery] = useState({ items: [] });
   const [storage, setStorage] = useState(null);
   const [systemStatus, setSystemStatus] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [galleryLoading, setGalleryLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -141,19 +180,23 @@ export default function DashboardPage() {
   const [previewTarget, setPreviewTarget] = useState(null);
 
   const crumbs = useMemo(() => breadcrumbSegments(directory.currentPath), [directory.currentPath]);
+  const galleryItems = useMemo(() => gallery.items, [gallery.items]);
 
   async function loadData(path = "") {
     setLoading(true);
+    setGalleryLoading(true);
     setError("");
 
     try {
-      const [filesResponse, storageResponse] = await Promise.all([
+      const [filesResponse, storageResponse, galleryResponse] = await Promise.all([
         request(`/files?path=${encodeURIComponent(path)}`),
         request("/storage"),
+        request("/gallery"),
       ]);
 
       setDirectory(filesResponse);
       setStorage(storageResponse);
+      setGallery(galleryResponse);
     } catch (requestError) {
       if (requestError.status === 401) {
         await refreshSession().catch(() => {});
@@ -164,6 +207,7 @@ export default function DashboardPage() {
       setError(requestError.message || "Unable to load files");
     } finally {
       setLoading(false);
+      setGalleryLoading(false);
     }
   }
 
@@ -283,7 +327,7 @@ export default function DashboardPage() {
       const result = await upload("/upload", {
         body: formData,
         fastUpload: fastUploadMode,
-        onProgress: ({ progress, fileName }) => {
+        onProgress: ({ progress, fileName, phase, chunkIndex, totalChunks }) => {
           setUploadProgress(Math.round(progress * 100));
           if (fileName) {
             setUploadFileName(
@@ -292,7 +336,13 @@ export default function DashboardPage() {
                 : fileName
             );
           }
-          setUploadPhase(progress >= 1 ? "Saving" : "Uploading");
+          setUploadPhase(
+            Number.isInteger(chunkIndex) && Number.isInteger(totalChunks)
+              ? `${phase || "Uploading"} ${chunkIndex + 1}/${totalChunks}`
+              : progress >= 1
+                ? "Saving"
+                : "Uploading"
+          );
         },
       });
 
@@ -543,6 +593,28 @@ export default function DashboardPage() {
             </div>
           </section>
         ) : null}
+
+        <section className="gallery-panel">
+          <div className="gallery-panel__header">
+            <div>
+              <p className="eyebrow">Gallery</p>
+              <h2>Open everything with thumbnails</h2>
+            </div>
+            <span>{gallery.items.length} item{gallery.items.length === 1 ? "" : "s"}</span>
+          </div>
+
+          {galleryLoading ? (
+            <div className="empty-state">Loading gallery...</div>
+          ) : galleryItems.length === 0 ? (
+            <div className="empty-state">No gallery items yet.</div>
+          ) : (
+            <div className="gallery-grid">
+              {galleryItems.map((item) => (
+                <GalleryCard key={item.path} item={item} onOpen={() => openItem(item)} />
+              ))}
+            </div>
+          )}
+        </section>
 
         <section className="directory-panel">
           <div className="directory-panel__header">

@@ -69,7 +69,7 @@ export async function createApp() {
     app.use(express.static(clientDist, { index: false, maxAge: "1h" }));
     app.get(/.*/, async (req, res) => {
       if (
-        ["/preview", "/video", "/download", "/files", "/folders", "/upload", "/delete", "/items", "/storage", "/system-status"].some(
+        ["/preview", "/video", "/download", "/files", "/gallery", "/folders", "/upload", "/delete", "/items", "/storage", "/system-status"].some(
           (prefix) => req.path === prefix || req.path.startsWith(`${prefix}/`)
         )
       ) {
