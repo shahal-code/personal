@@ -31,7 +31,9 @@ export default function StoragePanel({ storage, systemStatus, transferStatus }) 
   const network = systemStatus?.network;
   const cpuPercentage = Number(systemStatus?.cpu?.percentage);
   const formattedCpuPercentage = Number.isFinite(cpuPercentage)
-    ? `${Math.max(0, Math.min(100, cpuPercentage)).toFixed(1)}%`
+    ? cpuPercentage > 0 && cpuPercentage < 0.1
+      ? "<0.1%"
+      : `${Math.max(0, Math.min(100, cpuPercentage)).toFixed(1)}%`
     : "N/A";
 
   return (

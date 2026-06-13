@@ -273,6 +273,18 @@ async function readDumpsysCpuPercentage() {
   return Number.isFinite(percentage) ? Math.max(0, Math.min(100, percentage)) : null;
 }
 
+async function readProcessCpuPercentage() {
+  const firstUsage = process.cpuUsage();
+  const startedAt = process.hrtime.bigint();
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  const elapsedMicros = Number(process.hrtime.bigint() - startedAt) / 1000;
+  const usage = process.cpuUsage(firstUsage);
+  const usedMicros = usage.user + usage.system;
+  const percentage = elapsedMicros > 0 ? (usedMicros / elapsedMicros) * 100 : null;
+
+  return Number.isFinite(percentage) ? Math.max(0, Math.min(100, percentage)) : null;
+}
+
 async function readCpuUsage() {
   const first = (await readProcCpuSnapshot()) || cpuSnapshot();
   await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -292,10 +304,15 @@ async function readCpuUsage() {
 
   if (!Number.isFinite(percentage) || percentage <= 0) {
     const dumpsysPercentage = await readDumpsysCpuPercentage();
-    if (Number.isFinite(dumpsysPercentage)) {
+    if (Number.isFinite(dumpsysPercentage) && dumpsysPercentage > 0) {
       percentage = dumpsysPercentage;
       source = "dumpsys";
     }
+  }
+
+  if (!Number.isFinite(percentage) || percentage <= 0) {
+    percentage = await readProcessCpuPercentage();
+    source = "Node process";
   }
 
   const coreCount = os.cpus().length || os.availableParallelism?.() || null;
