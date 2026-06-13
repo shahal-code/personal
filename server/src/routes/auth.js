@@ -14,6 +14,7 @@ import {
 } from "../config/env.js";
 import { revokeToken } from "../lib/sessions.js";
 import { getRequestToken } from "../middleware/auth.js";
+import { noStore, rateLimit } from "../middleware/security.js";
 import { isValidEmail, parseJsonBody } from "../utils/validation.js";
 
 const router = Router();
@@ -63,7 +64,9 @@ function clearAuthCookie(res) {
   res.setHeader("Set-Cookie", cookieParts.join("; "));
 }
 
-router.post("/login", async (req, res) => {
+router.use(noStore);
+
+router.post("/login", rateLimit({ windowMs: WINDOW_MS, max: 20, message: "Too many login attempts. Try again later." }), async (req, res) => {
   const bucket = getAttemptBucket(req.ip);
 
   if (bucket.count >= MAX_ATTEMPTS) {
@@ -104,7 +107,12 @@ router.post("/login", async (req, res) => {
       jti,
     },
     JWT_SECRET,
-    { expiresIn: TOKEN_TTL }
+    {
+      expiresIn: TOKEN_TTL,
+      algorithm: "HS256",
+      audience: "phone-cloud-admin",
+      issuer: "phone-cloud",
+    }
   );
   const decoded = jwt.decode(token);
   const expiresAt = typeof decoded?.exp === "number" ? decoded.exp : now + 12 * 60 * 60;
@@ -124,7 +132,11 @@ router.post("/logout", async (req, res) => {
 
   if (token) {
     try {
-      const decoded = jwt.verify(token, JWT_SECRET);
+      const decoded = jwt.verify(token, JWT_SECRET, {
+        algorithms: ["HS256"],
+        audience: "phone-cloud-admin",
+        issuer: "phone-cloud",
+      });
       if (decoded?.jti && decoded?.exp) {
         await revokeToken(decoded.jti, decoded.exp);
       }

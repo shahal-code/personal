@@ -11,6 +11,7 @@ import storageRoutes from "./routes/storage.js";
 import { CLIENT_ORIGINS, DATA_DIR, STORAGE_ROOT } from "./config/env.js";
 import { assertRequiredEnv } from "./config/env.js";
 import { notFoundHandler, errorHandler } from "./middleware/error.js";
+import { noStore, rateLimit, requireTrustedOrigin, securityRequestId } from "./middleware/security.js";
 import { ensureDirectory } from "./lib/files.js";
 import { pruneExpiredTokens } from "./lib/sessions.js";
 
@@ -22,13 +23,30 @@ export async function createApp() {
 
   const app = express();
   app.set("trust proxy", 1);
+  app.disable("x-powered-by");
 
   app.use(
     helmet({
-      contentSecurityPolicy: false,
+      contentSecurityPolicy: {
+        useDefaults: true,
+        directives: {
+          "default-src": ["'self'"],
+          "base-uri": ["'self'"],
+          "frame-ancestors": ["'none'"],
+          "img-src": ["'self'", "data:", "blob:"],
+          "media-src": ["'self'", "blob:"],
+          "connect-src": ["'self'", ...CLIENT_ORIGINS],
+          "script-src": ["'self'"],
+          "style-src": ["'self'", "'unsafe-inline'"],
+        },
+      },
+      crossOriginEmbedderPolicy: false,
       crossOriginResourcePolicy: { policy: "cross-origin" },
+      referrerPolicy: { policy: "no-referrer" },
     })
   );
+  app.use(securityRequestId);
+  app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1200 }));
   app.use(
     cors({
       exposedHeaders: ["Content-Disposition", "Upload-Offset"],
@@ -46,13 +64,13 @@ export async function createApp() {
       credentials: true,
     })
   );
+  app.use(requireTrustedOrigin);
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-  app.get("/health", (req, res) => {
+  app.get("/health", noStore, (req, res) => {
     res.json({
       ok: true,
-      storageRoot: STORAGE_ROOT,
     });
   });
 

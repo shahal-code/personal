@@ -38,7 +38,11 @@ export async function requireAdmin(req, res, next) {
       return res.status(401).json({ message: "Authentication required" });
     }
 
-    const payload = jwt.verify(token, JWT_SECRET);
+    const payload = jwt.verify(token, JWT_SECRET, {
+      algorithms: ["HS256"],
+      audience: "phone-cloud-admin",
+      issuer: "phone-cloud",
+    });
     if (payload.email !== ADMIN_EMAIL || payload.role !== "admin") {
       return res.status(401).json({ message: "Invalid session" });
     }

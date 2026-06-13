@@ -8,6 +8,7 @@ import FilePreviewModal from "../components/FilePreviewModal.jsx";
 
 const UPLOAD_SESSION_KEY = "phonecloud.uploadSession";
 const UPLOAD_MODE_KEY = "phonecloud.uploadMode";
+const UPLOAD_HISTORY_KEY = "phonecloud.uploadHistory";
 
 function readUploadSession() {
   try {
@@ -51,6 +52,36 @@ function writeUploadMode(payload) {
   }
 }
 
+function readUploadHistory() {
+  try {
+    const raw = window.localStorage.getItem(UPLOAD_HISTORY_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeUploadHistory(history) {
+  try {
+    window.localStorage.setItem(UPLOAD_HISTORY_KEY, JSON.stringify(history.slice(0, 12)));
+  } catch {
+    // Ignore storage errors.
+  }
+}
+
+function addUploadHistoryEntry(entry) {
+  const nextHistory = [
+    {
+      id: crypto.randomUUID(),
+      updatedAt: new Date().toISOString(),
+      ...entry,
+    },
+    ...readUploadHistory(),
+  ].slice(0, 12);
+  writeUploadHistory(nextHistory);
+  return nextHistory;
+}
+
 function humanFileType(item) {
   if (item.type === "folder") {
     return "Folder";
@@ -66,6 +97,37 @@ function isImageItem(item) {
 
 function isVideoItem(item) {
   return ["mp4", "m4v", "mov", "webm"].includes((item?.extension || "").toLowerCase());
+}
+
+function galleryKind(item) {
+  if (item.type === "folder") return "folders";
+  if (isImageItem(item)) return "images";
+  if (isVideoItem(item)) return "videos";
+  return "documents";
+}
+
+function matchesQuery(item, query) {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return true;
+  return `${item.name || ""} ${item.displayPath || ""} ${item.extension || ""}`.toLowerCase().includes(normalized);
+}
+
+function sortItems(items, sortMode) {
+  return [...items].sort((left, right) => {
+    if (sortMode === "largest") return Number(right.size || 0) - Number(left.size || 0);
+    if (sortMode === "oldest") return new Date(left.modifiedAt || 0) - new Date(right.modifiedAt || 0);
+    if (sortMode === "type") return humanFileType(left).localeCompare(humanFileType(right));
+    if (sortMode === "name") return String(left.name || "").localeCompare(String(right.name || ""), undefined, { numeric: true, sensitivity: "base" });
+    return new Date(right.modifiedAt || 0) - new Date(left.modifiedAt || 0);
+  });
+}
+
+function formatDuration(seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "calculating";
+  if (seconds < 60) return `${Math.ceil(seconds)}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = Math.ceil(seconds % 60);
+  return `${minutes}m ${rest}s`;
 }
 
 function sortDirectoryItems(items) {
@@ -156,6 +218,9 @@ export default function DashboardPage() {
   const location = useLocation();
   const uploadRef = useRef(null);
   const uploadAbortRef = useRef(null);
+  const uploadFilesRef = useRef([]);
+  const uploadPathRef = useRef("");
+  const pauseRequestedRef = useRef(false);
   const messageTimerRef = useRef(null);
   const uploadCompletionRef = useRef(false);
   const [directory, setDirectory] = useState({ items: [], currentPath: "/", parentPath: "/" });
@@ -171,10 +236,22 @@ export default function DashboardPage() {
   const [uploadFileName, setUploadFileName] = useState("");
   const [uploadPhase, setUploadPhase] = useState("");
   const [uploadFileCount, setUploadFileCount] = useState(0);
+  const [uploadLoadedBytes, setUploadLoadedBytes] = useState(0);
+  const [uploadTotalBytes, setUploadTotalBytes] = useState(0);
+  const [uploadStartedAt, setUploadStartedAt] = useState(0);
+  const [uploadPaused, setUploadPaused] = useState(false);
+  const [uploadHistory, setUploadHistory] = useState(() => readUploadHistory());
   const [restoredUpload, setRestoredUpload] = useState(null);
   const [fastUploadMode, setFastUploadMode] = useState(true);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [fileQuery, setFileQuery] = useState("");
+  const [fileSort, setFileSort] = useState("newest");
+  const [galleryQuery, setGalleryQuery] = useState("");
+  const [galleryFilter, setGalleryFilter] = useState("all");
+  const [gallerySort, setGallerySort] = useState("newest");
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedPaths, setSelectedPaths] = useState([]);
   const [renameTarget, setRenameTarget] = useState(null);
   const [renameValue, setRenameValue] = useState("");
   const [folderModalOpen, setFolderModalOpen] = useState(false);
@@ -182,7 +259,25 @@ export default function DashboardPage() {
   const [previewTarget, setPreviewTarget] = useState(null);
 
   const crumbs = useMemo(() => breadcrumbSegments(directory.currentPath), [directory.currentPath]);
-  const galleryItems = useMemo(() => gallery.items, [gallery.items]);
+  const visibleDirectoryItems = useMemo(
+    () => sortItems(directory.items.filter((item) => matchesQuery(item, fileQuery)), fileSort),
+    [directory.items, fileQuery, fileSort]
+  );
+  const galleryItems = useMemo(
+    () =>
+      sortItems(
+        gallery.items.filter((item) => (galleryFilter === "all" ? true : galleryKind(item) === galleryFilter)).filter((item) => matchesQuery(item, galleryQuery)),
+        gallerySort
+      ),
+    [gallery.items, galleryFilter, galleryQuery, gallerySort]
+  );
+  const uploadElapsedSeconds = uploadStartedAt ? (Date.now() - uploadStartedAt) / 1000 : 0;
+  const uploadSpeed = uploadElapsedSeconds > 0 ? uploadLoadedBytes / uploadElapsedSeconds : 0;
+  const uploadEta = uploadSpeed > 0 ? (uploadTotalBytes - uploadLoadedBytes) / uploadSpeed : 0;
+  const selectedItems = useMemo(
+    () => directory.items.filter((item) => selectedPaths.includes(item.path)),
+    [directory.items, selectedPaths]
+  );
 
   async function loadData(path = "") {
     setLoading(true);
@@ -225,6 +320,8 @@ export default function DashboardPage() {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const path = params.get("path") || "";
+    setSelectedPaths([]);
+    setSelectionMode(false);
     loadData(path);
   }, [location.search]);
 
@@ -311,11 +408,21 @@ export default function DashboardPage() {
     const files = Array.from(event.target.files || []);
     if (files.length === 0) return;
 
+    uploadFilesRef.current = files;
+    uploadPathRef.current = directory.currentPath === "/" ? "" : directory.currentPath.replace(/^\/+/, "");
+    await runUpload(files, uploadPathRef.current, event.target);
+  }
+
+  async function runUpload(files, uploadPath, inputElement = null) {
     const uploadController = new AbortController();
     uploadAbortRef.current = uploadController;
-    const uploadPath = directory.currentPath === "/" ? "" : directory.currentPath.replace(/^\/+/, "");
+    pauseRequestedRef.current = false;
     setUploading(true);
+    setUploadPaused(false);
     setUploadProgress(0);
+    setUploadLoadedBytes(0);
+    setUploadTotalBytes(files.reduce((sum, file) => sum + Number(file.size || 0), 0));
+    setUploadStartedAt(Date.now());
     setUploadFileCount(files.length);
     setUploadFileName(files.length > 1 ? `${files.length} files selected` : files[0].name);
     setUploadPhase("Uploading");
@@ -332,8 +439,10 @@ export default function DashboardPage() {
         body: formData,
         fastUpload: fastUploadMode,
         signal: uploadController.signal,
-        onProgress: ({ progress, fileName, phase, chunkIndex, totalChunks }) => {
+        onProgress: ({ progress, fileName, phase, chunkIndex, totalChunks, loaded, total }) => {
           setUploadProgress(Math.round(progress * 100));
+          setUploadLoadedBytes(Number(loaded || 0));
+          setUploadTotalBytes(Number(total || 0));
           if (fileName) {
             setUploadFileName(
               files.length > 1
@@ -360,32 +469,101 @@ export default function DashboardPage() {
           ? `${result?.uploaded?.length || files.length} files uploaded successfully`
           : `${files[0].name} uploaded`
       );
+      setUploadHistory(
+        addUploadHistoryEntry({
+          status: "completed",
+          name: files.length > 1 ? `${files.length} files` : files[0].name,
+          size: files.reduce((sum, file) => sum + Number(file.size || 0), 0),
+          progress: 100,
+        })
+      );
 
       void loadData(uploadPath);
       void loadSystemStatus();
     } catch (requestError) {
-      if (requestError.message === "Upload cancelled") {
+      if (requestError.message === "Upload cancelled" && pauseRequestedRef.current) {
+        setUploadPaused(true);
+        setUploadPhase("Paused");
+        setMessage("Upload paused");
+      } else if (requestError.message === "Upload cancelled") {
         setMessage("Upload cancelled");
+        setUploadHistory(
+          addUploadHistoryEntry({
+            status: "cancelled",
+            name: files.length > 1 ? `${files.length} files` : files[0].name,
+            size: files.reduce((sum, file) => sum + Number(file.size || 0), 0),
+            progress: uploadProgress,
+          })
+        );
       } else {
         setError(requestError.message || "Upload failed");
+        setUploadHistory(
+          addUploadHistoryEntry({
+            status: "failed",
+            name: files.length > 1 ? `${files.length} files` : files[0].name,
+            size: files.reduce((sum, file) => sum + Number(file.size || 0), 0),
+            progress: uploadProgress,
+          })
+        );
       }
     } finally {
       if (uploadAbortRef.current === uploadController) {
         uploadAbortRef.current = null;
       }
       setUploading(false);
-      setUploadProgress(0);
-      setUploadFileName("");
-      setUploadPhase("");
-      setUploadFileCount(0);
-      uploadCompletionRef.current = false;
-      clearUploadSession();
-      event.target.value = "";
+      if (!pauseRequestedRef.current) {
+        uploadFilesRef.current = [];
+        uploadPathRef.current = "";
+        setUploadProgress(0);
+        setUploadLoadedBytes(0);
+        setUploadTotalBytes(0);
+        setUploadStartedAt(0);
+        setUploadFileName("");
+        setUploadPhase("");
+        setUploadFileCount(0);
+        uploadCompletionRef.current = false;
+        clearUploadSession();
+        if (inputElement) {
+          inputElement.value = "";
+        }
+      }
     }
   }
 
   function handleCancelUpload() {
+    if (uploadPaused && !uploading) {
+      pauseRequestedRef.current = false;
+      uploadFilesRef.current = [];
+      uploadPathRef.current = "";
+      setUploadPaused(false);
+      setUploadProgress(0);
+      setUploadLoadedBytes(0);
+      setUploadTotalBytes(0);
+      setUploadStartedAt(0);
+      setUploadFileName("");
+      setUploadPhase("");
+      setUploadFileCount(0);
+      setMessage("Upload cancelled");
+      clearUploadSession();
+      return;
+    }
+
+    pauseRequestedRef.current = false;
     uploadAbortRef.current?.abort();
+  }
+
+  function handlePauseUpload() {
+    pauseRequestedRef.current = true;
+    uploadAbortRef.current?.abort();
+  }
+
+  function handleResumeUpload() {
+    if (uploadFilesRef.current.length === 0) {
+      setError("Select the same file again to resume this upload");
+      return;
+    }
+
+    void runUpload(uploadFilesRef.current, uploadPathRef.current);
   }
 
   async function handleCreateFolder() {
@@ -460,6 +638,35 @@ export default function DashboardPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function handleBulkDelete() {
+    if (selectedItems.length === 0 || !window.confirm(`Delete ${selectedItems.length} selected item${selectedItems.length === 1 ? "" : "s"}?`)) {
+      return;
+    }
+
+    setBusy(true);
+    setError("");
+
+    try {
+      for (const item of selectedItems) {
+        await request("/delete", {
+          method: "DELETE",
+          body: { path: item.path },
+        });
+      }
+      setSelectedPaths([]);
+      setSelectionMode(false);
+      await loadData(directory.currentPath === "/" ? "" : directory.currentPath.replace(/^\/+/, ""));
+    } catch (requestError) {
+      setError(requestError.message || "Unable to delete selected items");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function toggleSelectedPath(path) {
+    setSelectedPaths((current) => (current.includes(path) ? current.filter((itemPath) => itemPath !== path) : [...current, path]));
   }
 
   async function handleLogout() {
@@ -564,9 +771,11 @@ export default function DashboardPage() {
           </div>
         </header>
 
-        <StoragePanel storage={storage} systemStatus={systemStatus} />
+        <div id="storage">
+          <StoragePanel storage={storage} systemStatus={systemStatus} />
+        </div>
 
-        {uploading ? (
+        {uploading || uploadPaused ? (
           <section className="upload-panel" aria-live="polite">
             <div className="upload-panel__header">
               <span>
@@ -576,6 +785,15 @@ export default function DashboardPage() {
               </span>
               <div className="upload-panel__controls">
                 <strong>{uploadProgress}%</strong>
+                {uploadPaused ? (
+                  <button className="ghost-button" type="button" onClick={handleResumeUpload}>
+                    Resume
+                  </button>
+                ) : (
+                  <button className="ghost-button" type="button" onClick={handlePauseUpload}>
+                    Pause
+                  </button>
+                )}
                 <button className="ghost-button ghost-button--danger" type="button" onClick={handleCancelUpload}>
                   Cancel
                 </button>
@@ -594,6 +812,9 @@ export default function DashboardPage() {
                 style={{ width: `${uploadProgress}%`, transition: "width 0.3s ease" }}
               />
             </div>
+            <p className="upload-panel__copy upload-panel__copy--metrics">
+              {`${formatBytes(uploadLoadedBytes)} of ${formatBytes(uploadTotalBytes)} · ${formatBytes(uploadSpeed)}/s · ETA ${formatDuration(uploadEta)}`}
+            </p>
           </section>
         ) : restoredUpload ? (
           <section className="upload-panel" aria-live="polite">
@@ -615,7 +836,39 @@ export default function DashboardPage() {
           </section>
         ) : null}
 
-        <section className={`gallery-panel ${galleryOpen ? "gallery-panel--open" : ""}`}>
+        {uploadHistory.length > 0 ? (
+          <section className="upload-history-panel">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">Uploads</p>
+                <h2>Recent activity</h2>
+              </div>
+              <button
+                className="ghost-button"
+                type="button"
+                onClick={() => {
+                  writeUploadHistory([]);
+                  setUploadHistory([]);
+                }}
+              >
+                Clear history
+              </button>
+            </div>
+            <div className="upload-history-list">
+              {uploadHistory.slice(0, 5).map((entry) => (
+                <article className={`upload-history-item upload-history-item--${entry.status}`} key={entry.id}>
+                  <div>
+                    <strong>{entry.name}</strong>
+                    <span>{formatBytes(entry.size || 0)} · {formatDate(entry.updatedAt)}</span>
+                  </div>
+                  <span>{entry.status} · {entry.progress || 0}%</span>
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        <section id="gallery" className={`gallery-panel ${galleryOpen ? "gallery-panel--open" : ""}`}>
           <div className="gallery-panel__header">
             <div>
               <p className="eyebrow">Gallery</p>
@@ -627,8 +880,35 @@ export default function DashboardPage() {
           </div>
 
           {galleryOpen ? (
-            galleryLoading ? (
-              <div className="empty-state">Loading gallery...</div>
+            <>
+              <div className="control-bar">
+                <input
+                  className="text-input control-input"
+                  type="search"
+                  value={galleryQuery}
+                  onChange={(event) => setGalleryQuery(event.target.value)}
+                  placeholder="Search gallery"
+                />
+                <select className="text-input control-select" value={galleryFilter} onChange={(event) => setGalleryFilter(event.target.value)}>
+                  <option value="all">All items</option>
+                  <option value="images">Images</option>
+                  <option value="videos">Videos</option>
+                  <option value="documents">Documents</option>
+                  <option value="folders">Folders</option>
+                </select>
+                <select className="text-input control-select" value={gallerySort} onChange={(event) => setGallerySort(event.target.value)}>
+                  <option value="newest">Newest first</option>
+                  <option value="name">Name</option>
+                  <option value="largest">Largest</option>
+                  <option value="type">Type</option>
+                </select>
+              </div>
+              {galleryLoading ? (
+                <div className="skeleton-grid">
+                  <span className="skeleton-card" />
+                  <span className="skeleton-card" />
+                  <span className="skeleton-card" />
+                </div>
             ) : galleryItems.length === 0 ? (
               <div className="empty-state">No gallery items yet.</div>
             ) : (
@@ -637,11 +917,12 @@ export default function DashboardPage() {
                   <GalleryCard key={item.path} item={item} onOpen={() => openItem(item)} />
                 ))}
               </div>
-            )
+              )}
+            </>
           ) : null}
         </section>
 
-        <section className="directory-panel">
+        <section id="files" className="directory-panel">
           <div className="directory-panel__header">
             <div>
               <p className="eyebrow">Files</p>
@@ -661,24 +942,70 @@ export default function DashboardPage() {
             </div>
           </div>
 
+          <div className="control-bar">
+            <input
+              className="text-input control-input"
+              type="search"
+              value={fileQuery}
+              onChange={(event) => setFileQuery(event.target.value)}
+              placeholder="Search current folder"
+            />
+            <select className="text-input control-select" value={fileSort} onChange={(event) => setFileSort(event.target.value)}>
+              <option value="newest">Newest first</option>
+              <option value="name">Name</option>
+              <option value="largest">Largest</option>
+              <option value="type">Type</option>
+            </select>
+            <button
+              className={`toggle-button ${selectionMode ? "toggle-button--active" : ""}`}
+              type="button"
+              onClick={() => {
+                setSelectionMode((current) => !current);
+                setSelectedPaths([]);
+              }}
+            >
+              {selectionMode ? "Cancel select" : "Select files"}
+            </button>
+            {selectionMode && selectedItems.length > 0 ? (
+              <button className="ghost-button ghost-button--danger" type="button" onClick={handleBulkDelete} disabled={busy}>
+                Delete {selectedItems.length}
+              </button>
+            ) : null}
+          </div>
+
           {message ? <div className="success-banner">{message}</div> : null}
           {error ? <div className="error-banner">{error}</div> : null}
 
           {loading ? (
-            <div className="empty-state">Loading files...</div>
-          ) : directory.items.length === 0 ? (
+            <div className="skeleton-list">
+              <span />
+              <span />
+              <span />
+            </div>
+          ) : visibleDirectoryItems.length === 0 ? (
             <div className="empty-state">This folder is empty.</div>
           ) : (
-            <div className="file-table">
+            <div className={`file-table ${selectionMode ? "file-table--selecting" : ""}`}>
               <div className="file-table__head">
+                {selectionMode ? <span>Select</span> : null}
                 <span>Name</span>
                 <span>Type</span>
                 <span>Size</span>
                 <span>Updated</span>
                 <span>Actions</span>
               </div>
-              {directory.items.map((item) => (
-                <article className="file-row" key={item.path}>
+              {visibleDirectoryItems.map((item) => (
+                <article className={`file-row ${selectedPaths.includes(item.path) ? "file-row--selected" : ""}`} key={item.path}>
+                  {selectionMode ? (
+                    <label className="select-check">
+                      <input
+                        type="checkbox"
+                        checked={selectedPaths.includes(item.path)}
+                        onChange={() => toggleSelectedPath(item.path)}
+                      />
+                      <span>Select</span>
+                    </label>
+                  ) : null}
                   <button className="file-name" type="button" onClick={() => openItem(item)}>
                     <div className={`file-icon file-icon--${item.type}`}>
                       {item.type === "folder" ? "DIR" : humanFileType(item).slice(0, 3)}
@@ -706,6 +1033,15 @@ export default function DashboardPage() {
           )}
         </section>
       </main>
+
+      <nav className="mobile-nav" aria-label="Mobile navigation">
+        <a href="#storage">Storage</a>
+        <a href="#gallery" onClick={() => setGalleryOpen(true)}>Gallery</a>
+        <a href="#files">Files</a>
+        <button type="button" onClick={() => uploadRef.current?.click()} disabled={busy || uploading}>
+          Upload
+        </button>
+      </nav>
 
       {folderModalOpen ? (
         <Modal

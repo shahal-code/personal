@@ -5,6 +5,8 @@ export default function StoragePanel({ storage, systemStatus }) {
   const used = Number(storage?.usedBytes || 0);
   const free = Number(storage?.freeBytes || 0);
   const usedPercent = total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0;
+  const freePercent = total > 0 ? Math.max(0, Math.round((free / total) * 100)) : 0;
+  const lowStorage = total > 0 && (freePercent <= 10 || free < 5 * 1024 * 1024 * 1024);
   const batteryPercent = systemStatus?.battery?.percentage ?? systemStatus?.batteryPercentage ?? null;
   const temperature = systemStatus?.temperature?.celsius ?? systemStatus?.temperatureCelsius ?? null;
   const memoryPercent =
@@ -27,6 +29,12 @@ export default function StoragePanel({ storage, systemStatus }) {
         </div>
         <span className="status-pill">{usedPercent}% used</span>
       </div>
+      {lowStorage ? (
+        <div className="storage-warning">
+          <strong>Storage health warning</strong>
+          <span>{formatBytes(free)} free. Large uploads may fail if the phone runs out of space.</span>
+        </div>
+      ) : null}
       <div className="storage-grid">
         <article className="metric-card">
           <span>Total</span>

@@ -28,6 +28,19 @@ const chunkUpload = express.raw({ type: "application/octet-stream", limit: "128m
 const chunkSessionRoot = path.join(TEMP_DIR, "chunk-sessions");
 const streamUploadRoot = path.join(TEMP_DIR, "stream-uploads");
 const resumableUploadRoot = path.join(TEMP_DIR, "resumable-uploads");
+const UPLOAD_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+
+function ensureSafeUploadId(uploadId) {
+  const safeUploadId = ensureSafeName(uploadId);
+  if (!UPLOAD_ID_PATTERN.test(safeUploadId)) {
+    throw Object.assign(new Error("Invalid upload session id"), { statusCode: 400 });
+  }
+  return safeUploadId;
+}
+
+function inlineDisposition(filePath) {
+  return `inline; filename="${path.basename(filePath).replaceAll('"', "")}"`;
+}
 
 async function ensureChunkSession(uploadId) {
   const sessionPath = path.join(chunkSessionRoot, uploadId);
@@ -337,7 +350,7 @@ router.post("/upload/session", async (req, res) => {
   const targetPath = parseRelativePath(body.path || "");
   const fileName = ensureSafeName(body.name || "");
   const totalSize = Number(body.size);
-  const uploadId = ensureSafeName(body.uploadId || randomUUID());
+  const uploadId = ensureSafeUploadId(body.uploadId || randomUUID());
   const fastUpload = body.fast === true;
 
   if (!fileName) {
@@ -387,7 +400,7 @@ router.post("/upload/session", async (req, res) => {
 
 router.get("/upload/session/:uploadId", async (req, res) => {
   await ensureRootReady();
-  const uploadId = ensureSafeName(req.params.uploadId || "");
+  const uploadId = ensureSafeUploadId(req.params.uploadId || "");
   const meta = await readResumableMeta(uploadId);
 
   if (!meta) {
@@ -410,7 +423,7 @@ router.get("/upload/session/:uploadId", async (req, res) => {
 
 router.patch("/upload/session/:uploadId", async (req, res) => {
   await ensureRootReady();
-  const uploadId = ensureSafeName(req.params.uploadId || "");
+  const uploadId = ensureSafeUploadId(req.params.uploadId || "");
   const meta = await readResumableMeta(uploadId);
 
   if (!meta) {
@@ -464,7 +477,7 @@ router.patch("/upload/session/:uploadId", async (req, res) => {
 
 router.post("/upload/session/:uploadId/complete", async (req, res) => {
   await ensureRootReady();
-  const uploadId = ensureSafeName(req.params.uploadId || "");
+  const uploadId = ensureSafeUploadId(req.params.uploadId || "");
   const meta = await readResumableMeta(uploadId);
 
   if (!meta) {
@@ -506,7 +519,7 @@ router.post("/upload/chunk", chunkUpload, async (req, res) => {
 
   const targetPath = parseRelativePath(req.query.path || "");
   const fileName = ensureSafeName(req.query.name || "");
-  const uploadId = ensureSafeName(req.query.uploadId || "");
+  const uploadId = ensureSafeUploadId(req.query.uploadId || "");
   const chunkIndex = Number(req.query.chunkIndex);
   const totalChunks = Number(req.query.totalChunks);
   const totalSize = Number(req.query.totalSize);
@@ -608,7 +621,7 @@ router.post("/upload/stream", async (req, res) => {
 
   const targetPath = parseRelativePath(req.query.path || "");
   const fileName = ensureSafeName(req.query.name || "");
-  const uploadId = ensureSafeName(req.query.uploadId || randomUUID());
+  const uploadId = ensureSafeUploadId(req.query.uploadId || randomUUID());
   const totalSize = Number(req.query.totalSize);
   const fastUpload = req.query.fast === "true";
   const destinationRelative = joinRelativePath(targetPath, fileName);
@@ -704,7 +717,7 @@ router.post("/upload/stream", async (req, res) => {
 router.get("/upload/chunk/status", async (req, res) => {
   await ensureRootReady();
 
-  const uploadId = ensureSafeName(req.query.uploadId || "");
+  const uploadId = ensureSafeUploadId(req.query.uploadId || "");
   const sessionPath = path.join(chunkSessionRoot, uploadId);
   const state = await getChunkSessionState(sessionPath);
 
@@ -742,6 +755,8 @@ router.get("/download", async (req, res) => {
     return res.status(400).json({ message: "Only files can be downloaded" });
   }
 
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Cache-Control", "private, no-store");
   return res.download(absolutePath, path.basename(absolutePath));
 });
 
@@ -757,7 +772,9 @@ router.get("/preview", async (req, res) => {
 
   return res.sendFile(absolutePath, {
     headers: {
-      "Content-Disposition": `inline; filename="${path.basename(absolutePath)}"`,
+      "Cache-Control": "private, no-store",
+      "Content-Disposition": inlineDisposition(absolutePath),
+      "X-Content-Type-Options": "nosniff",
     },
   });
 });
@@ -771,7 +788,9 @@ router.get("/preview/live", async (req, res) => {
   if (finalStats?.isFile()) {
     return res.sendFile(finalPath, {
       headers: {
-        "Content-Disposition": `inline; filename="${path.basename(finalPath)}"`,
+        "Cache-Control": "private, no-store",
+        "Content-Disposition": inlineDisposition(finalPath),
+        "X-Content-Type-Options": "nosniff",
       },
     });
   }
@@ -796,7 +815,9 @@ router.get("/preview/live", async (req, res) => {
 
     return res.sendFile(livePath, {
       headers: {
-        "Content-Disposition": `inline; filename="${path.basename(finalPath)}"`,
+        "Cache-Control": "private, no-store",
+        "Content-Disposition": inlineDisposition(finalPath),
+        "X-Content-Type-Options": "nosniff",
       },
     });
   }
@@ -829,13 +850,21 @@ router.get("/preview/hls/segment", async (req, res) => {
   const fileName = ensureSafeName(req.query.file || "");
   const segmentPath = await getHlsSegmentPath(relativePath, fileName);
 
-  return res.sendFile(segmentPath);
+  return res.sendFile(segmentPath, {
+    headers: {
+      "Cache-Control": "private, no-store",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
 });
 
 router.delete("/delete", async (req, res) => {
   await ensureRootReady();
   const body = parseJsonBody(req);
   const targetPath = parseRelativePath(body.path || req.query.path || "");
+  if (!targetPath || targetPath === "/") {
+    return res.status(400).json({ message: "Deleting the storage root is not allowed" });
+  }
   await removeEntry(STORAGE_ROOT, targetPath);
   return res.json({ message: "Item deleted" });
 });
