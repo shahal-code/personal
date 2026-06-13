@@ -288,6 +288,7 @@ router.post("/upload/chunk", chunkUpload, async (req, res) => {
   const chunkIndex = Number(req.query.chunkIndex);
   const totalChunks = Number(req.query.totalChunks);
   const isFinalChunk = req.query.final === "true";
+  const fastUpload = req.query.fast === "true";
 
   if (!Number.isInteger(chunkIndex) || chunkIndex < 0) {
     return res.status(400).json({ message: "Invalid chunk index" });
@@ -324,7 +325,7 @@ router.post("/upload/chunk", chunkUpload, async (req, res) => {
 
   const finalized = await tryFinalizeChunkSession(sessionPath, destinationAbsolute, totalChunks);
   if (finalized) {
-    if (shouldGenerateHls(fileName)) {
+    if (!fastUpload && shouldGenerateHls(fileName)) {
       startHlsTranscode({
         relativePath: destinationRelative,
         sourcePath: destinationAbsolute,
