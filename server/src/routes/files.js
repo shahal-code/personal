@@ -356,7 +356,7 @@ router.post("/upload/stream", async (req, res) => {
   const fastUpload = req.query.fast === "true";
   const destinationRelative = joinRelativePath(targetPath, fileName);
   const destinationAbsolute = resolveStoragePath(STORAGE_ROOT, destinationRelative).absolutePath;
-  const tempPath = path.join(streamUploadRoot, `${uploadId}.partial`);
+  const tempPath = path.join(path.dirname(destinationAbsolute), `.${path.basename(destinationAbsolute)}.${uploadId}.partial`);
   const statePath = getStreamUploadStatePath(uploadId);
   const existingState = await readStreamUploadState(uploadId);
 
