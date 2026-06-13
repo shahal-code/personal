@@ -295,36 +295,23 @@ export default function DashboardPage() {
             setUploadProgress(100);
             setUploadPhase("Saving");
             setMessage(`${files.length} file${files.length > 1 ? "s" : ""} uploaded`);
-            void loadData(uploadPath);
-            void loadSystemStatus();
+            appendItems(
+              files.map((file) => ({
+                name: file.name,
+                path: uploadPath ? `${uploadPath.replace(/\/+$/, "")}/${file.name}` : file.name,
+                size: file.size,
+                type: "file",
+                extension: file.name.includes(".") ? file.name.split(".").pop().toLowerCase() : "",
+                modifiedAt: new Date().toISOString(),
+                createdAt: new Date().toISOString(),
+              }))
+            );
           }
         },
       });
 
       if (result?.uploaded?.length) {
-        setDirectory((current) => {
-          const currentItems = Array.isArray(current.items) ? current.items : [];
-          const incoming = result.uploaded
-            .filter((item) => item?.path)
-            .map((item) => ({
-              ...item,
-              displayPath: item.path,
-              type: item.type || "file",
-              extension: item.extension || "",
-              modifiedAt: item.modifiedAt || new Date().toISOString(),
-              createdAt: item.createdAt || new Date().toISOString(),
-              size: Number(item.size || 0),
-            }));
-          const merged = sortDirectoryItems([
-            ...incoming.filter((item) => !currentItems.some((existing) => existing.path === item.path)),
-            ...currentItems,
-          ]);
-
-          return {
-            ...current,
-            items: merged,
-          };
-        });
+        appendItems(result.uploaded);
       }
 
       if (!uploadCompletionRef.current) {
@@ -442,6 +429,32 @@ export default function DashboardPage() {
   function openFolder(path) {
     const nextPath = path || "";
     navigate(nextPath ? `/app?path=${encodeURIComponent(nextPath)}` : "/app", { replace: true });
+  }
+
+  function appendItems(items) {
+    setDirectory((current) => {
+      const currentItems = Array.isArray(current.items) ? current.items : [];
+      const incoming = items
+        .filter((item) => item?.path)
+        .map((item) => ({
+          ...item,
+          displayPath: item.path,
+          type: item.type || "file",
+          extension: item.extension || "",
+          modifiedAt: item.modifiedAt || new Date().toISOString(),
+          createdAt: item.createdAt || new Date().toISOString(),
+          size: Number(item.size || 0),
+        }));
+      const merged = sortDirectoryItems([
+        ...incoming.filter((item) => !currentItems.some((existing) => existing.path === item.path)),
+        ...currentItems,
+      ]);
+
+      return {
+        ...current,
+        items: merged,
+      };
+    });
   }
 
   return (
