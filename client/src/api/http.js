@@ -8,7 +8,9 @@ function normalizeError(message, status, details) {
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
 const CHUNK_SIZE = 32 * 1024 * 1024;
 const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024;
-const STREAM_LARGE_UPLOADS = import.meta.env.VITE_STREAM_LARGE_UPLOADS === "true";
+// Direct phone/LAN uploads are fastest as one continuous stream. Set this to
+// "false" only when a proxy upload limit requires resumable chunks.
+const STREAM_LARGE_UPLOADS = import.meta.env.VITE_STREAM_LARGE_UPLOADS !== "false";
 const UPLOAD_SESSION_STORAGE_KEY = "phonecloud.resumableUploads";
 
 function buildUrl(path) {
