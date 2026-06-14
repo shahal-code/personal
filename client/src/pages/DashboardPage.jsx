@@ -5,6 +5,7 @@ import { useAuth } from "../context/AuthContext.jsx";
 import StoragePanel from "../components/StoragePanel.jsx";
 import Modal from "../components/Modal.jsx";
 import FilePreviewModal from "../components/FilePreviewModal.jsx";
+import ConfirmModal from "../components/ConfirmModal.jsx";
 
 const UPLOAD_SESSION_KEY = "phonecloud.uploadSession";
 const UPLOAD_MODE_KEY = "phonecloud.uploadMode";
@@ -258,6 +259,7 @@ export default function DashboardPage() {
   const [folderName, setFolderName] = useState("");
   const [previewTarget, setPreviewTarget] = useState(null);
   const [changingStorageRoot, setChangingStorageRoot] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   const crumbs = useMemo(() => breadcrumbSegments(directory.currentPath), [directory.currentPath]);
   const visibleDirectoryItems = useMemo(
@@ -665,49 +667,38 @@ export default function DashboardPage() {
     }
   }
 
-  async function handleDelete(item) {
-    if (!window.confirm(`Delete ${item.name}?`)) {
-      return;
-    }
-
+  async function confirmDelete() {
+    if (!deleteTarget) return;
     setBusy(true);
     setError("");
 
     try {
-      await request("/delete", {
-        method: "DELETE",
-        body: { path: item.path },
-      });
-      await loadData(directory.currentPath === "/" ? "" : directory.currentPath.replace(/^\/+/, ""));
-    } catch (requestError) {
-      setError(requestError.message || "Unable to delete item");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleBulkDelete() {
-    if (selectedItems.length === 0 || !window.confirm(`Delete ${selectedItems.length} selected item${selectedItems.length === 1 ? "" : "s"}?`)) {
-      return;
-    }
-
-    setBusy(true);
-    setError("");
-
-    try {
-      for (const item of selectedItems) {
+      for (const item of deleteTarget.items) {
         await request("/delete", {
           method: "DELETE",
           body: { path: item.path },
         });
       }
-      setSelectedPaths([]);
-      setSelectionMode(false);
+      setDeleteTarget(null);
+      if (deleteTarget.kind === "bulk") {
+        setSelectedPaths([]);
+        setSelectionMode(false);
+      }
       await loadData(directory.currentPath === "/" ? "" : directory.currentPath.replace(/^\/+/, ""));
     } catch (requestError) {
       setError(requestError.message || "Unable to delete selected items");
     } finally {
       setBusy(false);
+    }
+  }
+
+  function handleDelete(item) {
+    setDeleteTarget({ kind: "single", items: [item] });
+  }
+
+  function handleBulkDelete() {
+    if (selectedItems.length > 0) {
+      setDeleteTarget({ kind: "bulk", items: selectedItems });
     }
   }
 
@@ -1119,6 +1110,21 @@ export default function DashboardPage() {
           onConfirm={handleRename}
           onClose={() => setRenameTarget(null)}
           confirmLabel="Rename"
+        />
+      ) : null}
+
+      {deleteTarget ? (
+        <ConfirmModal
+          title={deleteTarget.kind === "bulk" ? `Delete ${deleteTarget.items.length} items?` : `Delete ${deleteTarget.items[0].name}?`}
+          description={
+            deleteTarget.kind === "bulk"
+              ? "These files and folders will be permanently deleted. This action cannot be undone."
+              : `${deleteTarget.items[0].type === "folder" ? "This folder and everything inside it" : "This file"} will be permanently deleted. This action cannot be undone.`
+          }
+          confirmLabel={deleteTarget.kind === "bulk" ? `Delete ${deleteTarget.items.length} items` : "Delete"}
+          busy={busy}
+          onConfirm={confirmDelete}
+          onClose={() => setDeleteTarget(null)}
         />
       ) : null}
 
