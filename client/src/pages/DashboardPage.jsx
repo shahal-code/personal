@@ -217,7 +217,7 @@ const GalleryCard = memo(function GalleryCard({ item, onOpen }) {
           <img src={previewUrl} alt={item.name} loading="lazy" />
         ) : isVideoItem(item) ? (
           <>
-            <video src={previewUrl} preload="none" muted playsInline />
+            <span className="gallery-thumb__icon gallery-thumb__icon--video">VID</span>
             <span className="gallery-thumb__play">Play</span>
           </>
         ) : (
