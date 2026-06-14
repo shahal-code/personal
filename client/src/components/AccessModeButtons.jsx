@@ -12,7 +12,7 @@ export default function AccessModeButtons() {
 
   function switchTo(url) {
     if (!url) return;
-    window.location.assign(`${url.replace(/\/+$/, "")}/app`);
+    window.location.assign(`${url.replace(/\/+$/, "")}/login`);
   }
 
   const currentOrigin = window.location.origin;
