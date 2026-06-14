@@ -8,9 +8,7 @@ function normalizeError(message, status, details) {
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "");
 const CHUNK_SIZE = 32 * 1024 * 1024;
 const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024;
-// Direct phone/LAN uploads are fastest as one continuous stream. Set this to
-// "false" only when a proxy upload limit requires resumable chunks.
-const STREAM_LARGE_UPLOADS = import.meta.env.VITE_STREAM_LARGE_UPLOADS !== "false";
+const STREAM_LARGE_UPLOADS_SETTING = import.meta.env.VITE_STREAM_LARGE_UPLOADS || "auto";
 const UPLOAD_SESSION_STORAGE_KEY = "phonecloud.resumableUploads";
 
 function buildUrl(path) {
@@ -137,6 +135,31 @@ async function verifyUploadedFile(targetPath, fileName, expectedSize) {
   } catch {
     return null;
   }
+}
+
+async function waitForUploadedFile(targetPath, fileName, expectedSize, attempts = 10) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const verified = await verifyUploadedFile(targetPath, fileName, expectedSize);
+    if (verified) return verified;
+    await delay(1000 + attempt * 250);
+  }
+  return null;
+}
+
+function shouldStreamLargeUploads() {
+  if (STREAM_LARGE_UPLOADS_SETTING === "true") return true;
+  if (STREAM_LARGE_UPLOADS_SETTING === "false") return false;
+
+  const hostname = window.location.hostname.toLowerCase();
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "::1" ||
+    hostname.endsWith(".local") ||
+    /^10\./.test(hostname) ||
+    /^192\.168\./.test(hostname) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(hostname)
+  );
 }
 
 export async function request(path, options = {}) {
@@ -638,7 +661,7 @@ export async function uploadFiles(path, options = {}) {
     let payload;
     let lastError = null;
     const maxRetries = 2;
-    const useChunkedUpload = file.size > LARGE_FILE_THRESHOLD && !STREAM_LARGE_UPLOADS;
+    const useChunkedUpload = file.size > LARGE_FILE_THRESHOLD && !shouldStreamLargeUploads();
 
     if (useChunkedUpload) {
       // Large file → chunked upload (bypasses Cloudflare 100MB limit)
@@ -691,15 +714,13 @@ export async function uploadFiles(path, options = {}) {
         } catch (error) {
           lastError = error;
 
-          const verified = await verifyUploadedFile(targetPath, file.name, file.size);
+          const verified = fileLoaded >= file.size * 0.95
+            ? await waitForUploadedFile(targetPath, file.name, file.size)
+            : await verifyUploadedFile(targetPath, file.name, file.size);
           if (verified) {
             payload = verified;
             lastError = null;
             break;
-          }
-
-          if (file.size > LARGE_FILE_THRESHOLD && fileLoaded >= file.size * 0.95) {
-            throw error;
           }
 
           if (!isRetryableUploadError(error) || attempt >= maxRetries) {
