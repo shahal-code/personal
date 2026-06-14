@@ -34,9 +34,11 @@ import {
   s3CreateUploadUrl,
   s3DeleteEntry,
   s3FileExists,
+  s3GetObject,
   s3GetFileInfo,
   s3ListAllItems,
   s3ListDirectory,
+  contentTypeForPath,
 } from "../lib/s3-storage.js";
 
 const router = Router();
@@ -1018,7 +1020,21 @@ router.get("/preview", async (req, res) => {
   await ensureRootReady();
   if (USE_S3_STORAGE) {
     const relativePath = parseRelativePath(req.query.path || "");
-    return res.redirect(await s3CreateReadUrl(relativePath, false));
+    const range = String(req.headers.range || "");
+    const object = await s3GetObject(relativePath, range);
+    const statusCode = object.ContentRange ? 206 : 200;
+
+    res.status(statusCode);
+    res.setHeader("Content-Type", object.ContentType || contentTypeForPath(relativePath) || "application/octet-stream");
+    res.setHeader("Accept-Ranges", "bytes");
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("Content-Disposition", inlineDisposition(relativePath));
+    if (object.ContentLength != null) res.setHeader("Content-Length", String(object.ContentLength));
+    if (object.ContentRange) res.setHeader("Content-Range", object.ContentRange);
+    if (object.ETag) res.setHeader("ETag", object.ETag);
+
+    object.Body.pipe(res);
+    return;
   }
   const STORAGE_ROOT = getActiveStorageRoot();
   const relativePath = parseRelativePath(req.query.path || "");

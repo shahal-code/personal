@@ -231,7 +231,7 @@ export async function s3CreateMultipartUpload(relativePath, contentType) {
   };
 }
 
-function contentTypeForPath(relativePath) {
+export function contentTypeForPath(relativePath) {
   const extension = path.posix.extname(normalizeRelativePath(relativePath)).slice(1).toLowerCase();
   return {
     mp4: "video/mp4",
@@ -249,6 +249,17 @@ function contentTypeForPath(relativePath) {
     webp: "image/webp",
     pdf: "application/pdf",
   }[extension];
+}
+
+export async function s3GetObject(relativePath, range = "") {
+  return s3.send(
+    new GetObjectCommand({
+      Bucket: S3_BUCKET,
+      Key: keyFor(relativePath),
+      Range: range || undefined,
+      ResponseContentType: contentTypeForPath(relativePath),
+    })
+  );
 }
 
 export async function s3CreateMultipartPartUrl(relativePath, uploadId, partNumber) {
