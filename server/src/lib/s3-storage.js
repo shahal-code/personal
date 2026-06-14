@@ -1,10 +1,14 @@
 import path from "node:path";
 import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
+  CreateMultipartUploadCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
   ListObjectsV2Command,
   PutObjectCommand,
+  UploadPartCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -210,6 +214,59 @@ export async function s3CreateUploadUrl(relativePath, contentType) {
     ContentType: contentType || "application/octet-stream",
   });
   return getSignedUrl(s3, command, { expiresIn: 60 * 15 });
+}
+
+export async function s3CreateMultipartUpload(relativePath, contentType) {
+  const response = await s3.send(
+    new CreateMultipartUploadCommand({
+      Bucket: S3_BUCKET,
+      Key: keyFor(relativePath),
+      ContentType: contentType || "application/octet-stream",
+    })
+  );
+
+  return {
+    uploadId: response.UploadId,
+    key: response.Key,
+  };
+}
+
+export async function s3CreateMultipartPartUrl(relativePath, uploadId, partNumber) {
+  const command = new UploadPartCommand({
+    Bucket: S3_BUCKET,
+    Key: keyFor(relativePath),
+    UploadId: uploadId,
+    PartNumber: partNumber,
+  });
+  return getSignedUrl(s3, command, { expiresIn: 60 * 15 });
+}
+
+export async function s3CompleteMultipartUpload(relativePath, uploadId, parts) {
+  await s3.send(
+    new CompleteMultipartUploadCommand({
+      Bucket: S3_BUCKET,
+      Key: keyFor(relativePath),
+      UploadId: uploadId,
+      MultipartUpload: {
+        Parts: parts
+          .map((part) => ({
+            ETag: part.ETag || part.etag,
+            PartNumber: Number(part.PartNumber || part.partNumber),
+          }))
+          .sort((left, right) => left.PartNumber - right.PartNumber),
+      },
+    })
+  );
+}
+
+export async function s3AbortMultipartUpload(relativePath, uploadId) {
+  await s3.send(
+    new AbortMultipartUploadCommand({
+      Bucket: S3_BUCKET,
+      Key: keyFor(relativePath),
+      UploadId: uploadId,
+    })
+  );
 }
 
 export async function s3CreateReadUrl(relativePath, download = false) {

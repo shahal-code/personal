@@ -9,6 +9,8 @@ const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "
 // Keep chunks below common 100 MB proxy limits while minimizing per-chunk
 // request and save overhead for large public-domain uploads.
 const CHUNK_SIZE = 64 * 1024 * 1024;
+const S3_MULTIPART_PART_SIZE = 16 * 1024 * 1024;
+const S3_MULTIPART_CONCURRENCY = 4;
 const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024;
 const STREAM_LARGE_UPLOADS_SETTING = import.meta.env.VITE_STREAM_LARGE_UPLOADS || "auto";
 const UPLOAD_SESSION_STORAGE_KEY = "phonecloud.resumableUploads";
@@ -436,6 +438,151 @@ function sendDirectPut(url, blob, options = {}) {
   });
 }
 
+function sendS3Part(url, blob, options = {}) {
+  const { signal, onProgress } = options;
+  let lastProgressUpdate = 0;
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", url, true);
+    xhr.responseType = "text";
+
+    if (signal) {
+      if (signal.aborted) {
+        xhr.abort();
+        reject(normalizeError("Upload cancelled", 0));
+        return;
+      }
+
+      signal.addEventListener(
+        "abort",
+        () => {
+          xhr.abort();
+          reject(normalizeError("Upload cancelled", 0));
+        },
+        { once: true }
+      );
+    }
+
+    xhr.upload.onprogress = (event) => {
+      if (typeof onProgress === "function" && event.lengthComputable) {
+        const now = Date.now();
+        if (now - lastProgressUpdate >= 100 || event.loaded === event.total) {
+          lastProgressUpdate = now;
+          onProgress(event.loaded);
+        }
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(normalizeError(xhr.responseText || xhr.statusText || "Upload failed", xhr.status));
+        return;
+      }
+      resolve(xhr.getResponseHeader("ETag") || "");
+    };
+
+    xhr.onerror = () => {
+      reject(normalizeError("Upload network error. The browser lost the connection before S3 returned a response.", xhr.status || 0));
+    };
+
+    xhr.onabort = () => {
+      reject(normalizeError("Upload cancelled", xhr.status || 0));
+    };
+
+    xhr.send(blob);
+  });
+}
+
+async function sendS3Multipart(basePath, file, options = {}) {
+  const { signal, targetPath = "", onProgress } = options;
+  const session = await request(`${basePath}/s3/multipart/create`, {
+    method: "POST",
+    body: {
+      path: targetPath,
+      name: file.name,
+      size: file.size,
+      type: file.type || "application/octet-stream",
+    },
+    signal,
+  });
+
+  const partCount = Math.ceil(file.size / S3_MULTIPART_PART_SIZE);
+  const parts = Array.from({ length: partCount }, (_, index) => {
+    const start = index * S3_MULTIPART_PART_SIZE;
+    const end = Math.min(start + S3_MULTIPART_PART_SIZE, file.size);
+    return {
+      partNumber: index + 1,
+      start,
+      end,
+      loaded: 0,
+    };
+  });
+
+  const completedParts = [];
+  let nextIndex = 0;
+
+  function emit() {
+    const loaded = parts.reduce((sum, part) => sum + part.loaded, 0);
+    onProgress?.({
+      loaded,
+      total: file.size,
+      progress: file.size > 0 ? loaded / file.size : 0,
+      phase: "Uploading",
+    });
+  }
+
+  async function worker() {
+    while (nextIndex < parts.length) {
+      const part = parts[nextIndex];
+      nextIndex += 1;
+
+      const { url } = await request(`${basePath}/s3/multipart/part`, {
+        method: "POST",
+        body: {
+          path: session.path,
+          uploadId: session.uploadId,
+          partNumber: part.partNumber,
+        },
+        signal,
+      });
+
+      const etag = await sendS3Part(url, file.slice(part.start, part.end), {
+        signal,
+        onProgress: (loaded) => {
+          part.loaded = loaded;
+          emit();
+        },
+      });
+
+      part.loaded = part.end - part.start;
+      completedParts.push({ ETag: etag, PartNumber: part.partNumber });
+      emit();
+    }
+  }
+
+  try {
+    await Promise.all(Array.from({ length: Math.min(S3_MULTIPART_CONCURRENCY, parts.length) }, () => worker()));
+  } catch (error) {
+    await request(`${basePath}/s3/multipart/abort`, {
+      method: "POST",
+      body: { path: session.path, uploadId: session.uploadId },
+      signal,
+    }).catch(() => {});
+    throw error;
+  }
+
+  return request(`${basePath}/s3/multipart/complete`, {
+    method: "POST",
+    body: {
+      path: session.path,
+      uploadId: session.uploadId,
+      parts: completedParts,
+    },
+    signal,
+  });
+}
+
 function sendUploadSlice(path, blob, options = {}) {
   const { headers = {}, signal, onProgress, uploadOffset = 0 } = options;
   let lastProgressUpdate = 0;
@@ -733,21 +880,50 @@ export async function uploadFiles(path, options = {}) {
     let lastError = null;
     const maxRetries = 2;
     const useChunkedUpload = file.size > LARGE_FILE_THRESHOLD && !shouldStreamLargeUploads();
-    const s3Presign = await request(`${path.replace(/\/+$/, "")}/s3/presign`, {
-      method: "POST",
-      body: {
-        path: targetPath,
-        name: file.name,
-        size: file.size,
-        type: file.type || "application/octet-stream",
-      },
-      signal,
-    }).catch((error) => {
-      if (error?.status === 400 || error?.status === 404) return null;
-      throw error;
-    });
+    let s3Presign = null;
+    const s3BasePath = path.replace(/\/+$/, "");
 
-    if (s3Presign?.mode === "s3" && s3Presign.url) {
+    if (file.size > LARGE_FILE_THRESHOLD) {
+      try {
+        payload = await sendS3Multipart(s3BasePath, file, {
+          signal,
+          targetPath,
+          onProgress: (progressEvent) => {
+            fileLoaded = progressEvent.loaded || 0;
+            emitProgress({
+              chunkProgress: progressEvent.total > 0 ? fileLoaded / progressEvent.total : 0,
+              phase: progressEvent.phase,
+            });
+          },
+        });
+      } catch (error) {
+        if (error?.status === 400 || error?.status === 404) {
+          payload = null;
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    if (!payload) {
+      s3Presign = await request(`${s3BasePath}/s3/presign`, {
+        method: "POST",
+        body: {
+          path: targetPath,
+          name: file.name,
+          size: file.size,
+          type: file.type || "application/octet-stream",
+        },
+        signal,
+      }).catch((error) => {
+        if (error?.status === 400 || error?.status === 404) return null;
+        throw error;
+      });
+    }
+
+    if (payload) {
+      lastError = null;
+    } else if (s3Presign?.mode === "s3" && s3Presign.url) {
       await sendDirectPut(s3Presign.url, file, {
         headers: s3Presign.headers || { "Content-Type": file.type || "application/octet-stream" },
         signal,
@@ -759,7 +935,7 @@ export async function uploadFiles(path, options = {}) {
           });
         },
       });
-      payload = await request(`${path.replace(/\/+$/, "")}/s3/complete`, {
+      payload = await request(`${s3BasePath}/s3/complete`, {
         method: "POST",
         body: { path: s3Presign.path },
         signal,

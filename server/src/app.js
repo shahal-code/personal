@@ -32,12 +32,14 @@ export async function createApp() {
   app.set("trust proxy", 1);
   app.disable("x-powered-by");
   const connectSources = ["'self'", ...CLIENT_ORIGINS];
+  const s3Sources = [];
   if (STORAGE_DRIVER === "s3" && S3_BUCKET && AWS_REGION) {
-    connectSources.push(
+    s3Sources.push(
       `https://${S3_BUCKET}.s3.${AWS_REGION}.amazonaws.com`,
       `https://${S3_BUCKET}.s3.amazonaws.com`,
       "https://*.s3.amazonaws.com"
     );
+    connectSources.push(...s3Sources);
   }
 
   app.use(
@@ -48,8 +50,8 @@ export async function createApp() {
           "default-src": ["'self'"],
           "base-uri": ["'self'"],
           "frame-ancestors": ["'none'"],
-          "img-src": ["'self'", "data:", "blob:"],
-          "media-src": ["'self'", "blob:"],
+          "img-src": ["'self'", "data:", "blob:", ...s3Sources],
+          "media-src": ["'self'", "blob:", ...s3Sources],
           "connect-src": connectSources,
           "script-src": ["'self'"],
           "style-src": ["'self'", "'unsafe-inline'"],

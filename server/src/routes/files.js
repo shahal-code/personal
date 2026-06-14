@@ -25,7 +25,11 @@ import { parseJsonBody, parseRelativePath } from "../utils/validation.js";
 import { getActiveStorageRoot, getStorageRootById, getStorageRootState } from "../lib/storage-roots.js";
 import { createTransferJob, getTransferJobs } from "../lib/transfer-jobs.js";
 import {
+  s3AbortMultipartUpload,
+  s3CompleteMultipartUpload,
   s3CreateFolder,
+  s3CreateMultipartPartUrl,
+  s3CreateMultipartUpload,
   s3CreateReadUrl,
   s3CreateUploadUrl,
   s3DeleteEntry,
@@ -414,6 +418,99 @@ router.post("/upload/s3/complete", async (req, res) => {
       },
     ],
   });
+});
+
+router.post("/upload/s3/multipart/create", async (req, res) => {
+  await ensureRootReady();
+  if (!USE_S3_STORAGE) {
+    return res.status(400).json({ message: "S3 storage is not enabled" });
+  }
+
+  const body = parseJsonBody(req);
+  const targetPath = parseRelativePath(body.path || "");
+  const fileName = ensureSafeName(body.name || "");
+  const size = Number(body.size || 0);
+  const contentType = String(body.type || "application/octet-stream");
+  const destinationRelative = joinRelativePath(targetPath, fileName);
+
+  if (!fileName) return res.status(400).json({ message: "File name is required" });
+  if (!Number.isFinite(size) || size <= 0) return res.status(400).json({ message: "File size is required" });
+  if (await s3FileExists(destinationRelative)) {
+    return res.status(409).json({ message: `File already exists: ${fileName}` });
+  }
+
+  const upload = await s3CreateMultipartUpload(destinationRelative, contentType);
+  return res.status(201).json({
+    mode: "s3-multipart",
+    uploadId: upload.uploadId,
+    path: destinationRelative,
+  });
+});
+
+router.post("/upload/s3/multipart/part", async (req, res) => {
+  await ensureRootReady();
+  if (!USE_S3_STORAGE) {
+    return res.status(400).json({ message: "S3 storage is not enabled" });
+  }
+
+  const body = parseJsonBody(req);
+  const relativePath = parseRelativePath(body.path || "");
+  const uploadId = ensureSafeUploadId(body.uploadId || "");
+  const partNumber = Number(body.partNumber);
+
+  if (!Number.isInteger(partNumber) || partNumber < 1 || partNumber > 10000) {
+    return res.status(400).json({ message: "Invalid part number" });
+  }
+
+  return res.json({
+    url: await s3CreateMultipartPartUrl(relativePath, uploadId, partNumber),
+  });
+});
+
+router.post("/upload/s3/multipart/complete", async (req, res) => {
+  await ensureRootReady();
+  if (!USE_S3_STORAGE) {
+    return res.status(400).json({ message: "S3 storage is not enabled" });
+  }
+
+  const body = parseJsonBody(req);
+  const relativePath = parseRelativePath(body.path || "");
+  const uploadId = ensureSafeUploadId(body.uploadId || "");
+  const parts = Array.isArray(body.parts) ? body.parts : [];
+
+  if (!parts.length) {
+    return res.status(400).json({ message: "Multipart parts are required" });
+  }
+
+  await s3CompleteMultipartUpload(relativePath, uploadId, parts);
+  const item = await s3GetFileInfo(relativePath);
+  return res.status(201).json({
+    message: "Upload complete",
+    uploaded: [
+      {
+        name: path.posix.basename(relativePath),
+        path: relativePath,
+        size: item.size,
+        modifiedAt: item.updatedAt,
+        createdAt: item.createdAt,
+        type: "file",
+        extension: item.extension,
+      },
+    ],
+  });
+});
+
+router.post("/upload/s3/multipart/abort", async (req, res) => {
+  await ensureRootReady();
+  if (!USE_S3_STORAGE) {
+    return res.status(400).json({ message: "S3 storage is not enabled" });
+  }
+
+  const body = parseJsonBody(req);
+  const relativePath = parseRelativePath(body.path || "");
+  const uploadId = ensureSafeUploadId(body.uploadId || "");
+  await s3AbortMultipartUpload(relativePath, uploadId);
+  return res.json({ message: "Multipart upload aborted" });
 });
 
 router.post("/upload", upload.array("files"), async (req, res) => {
