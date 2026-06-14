@@ -43,6 +43,7 @@ body,
 body {
   min-height: 100svh;
   overflow-x: hidden;
+  overscroll-behavior-y: none;
 }
 
 button,
@@ -342,6 +343,7 @@ h2 {
 .directory-panel {
   padding: 22px;
   background: rgba(12, 20, 31, 0.72);
+  contain: layout paint;
 }
 
 .storage-panel__header,
@@ -379,6 +381,8 @@ h2 {
   color: var(--text);
   text-align: left;
   transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
+  content-visibility: auto;
+  contain-intrinsic-size: 220px;
 }
 
 .gallery-card:hover {
@@ -474,6 +478,7 @@ h2 {
   background: rgba(9, 17, 27, 0.86);
   display: grid;
   gap: 8px;
+  contain: layout paint;
 }
 
 .status-card {
@@ -483,6 +488,7 @@ h2 {
   border: 1px solid rgba(166, 188, 214, 0.12);
   display: grid;
   gap: 8px;
+  contain: layout paint;
 }
 
 .status-card span {
@@ -721,6 +727,8 @@ h2 {
   flex-direction: column;
   gap: 9px;
   transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
+  content-visibility: auto;
+  contain-intrinsic-size: 190px;
 }
 
 .file-row:hover {
@@ -1066,6 +1074,31 @@ h2 {
 }
 
 @media (max-width: 760px) {
+  :root {
+    --shadow: 0 10px 28px rgba(0, 0, 0, 0.24);
+    background: #081019;
+  }
+
+  .loading-card,
+  .auth-card,
+  .storage-panel,
+  .directory-panel,
+  .gallery-panel,
+  .sidebar,
+  .metric-card,
+  .modal-card {
+    backdrop-filter: none;
+  }
+
+  .topbar,
+  .storage-panel,
+  .gallery-panel,
+  .directory-panel,
+  .upload-panel,
+  .sidebar {
+    box-shadow: none;
+  }
+
   .app-shell {
     padding: 12px;
     padding-bottom: 84px;
@@ -1160,6 +1193,16 @@ h2 {
   .modal-actions {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .storage-root-controls {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    justify-content: stretch;
+  }
+
+  .storage-root-controls label {
+    grid-column: 1 / -1;
   }
 
   .breadcrumb {
@@ -1260,7 +1303,7 @@ h2 {
     background: rgba(7, 13, 22, 0.9);
     border: 1px solid var(--border-strong);
     box-shadow: var(--shadow);
-    backdrop-filter: blur(18px);
+    backdrop-filter: none;
   }
 
   .mobile-nav a,
@@ -1276,10 +1319,45 @@ h2 {
     font: inherit;
     font-size: 0.8rem;
     font-weight: 800;
+    touch-action: manipulation;
   }
 
   .mobile-nav button:disabled {
     opacity: 0.5;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .secondary-button:hover,
+  .ghost-button:hover,
+  .icon-button:hover,
+  .toggle-button:hover,
+  .gallery-card:hover,
+  .file-row:hover {
+    transform: none;
+  }
+
+  button,
+  .gallery-card,
+  .file-name {
+    touch-action: manipulation;
+  }
+
+  .preview-nav {
+    width: 44px;
+    height: 56px;
+    background: rgba(7, 13, 22, 0.88);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
 

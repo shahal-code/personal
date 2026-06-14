@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { request, upload, formatBytes, formatDate, resolveUrl } from "../api/http.js";
 import { useAuth } from "../context/AuthContext.jsx";
@@ -183,7 +183,7 @@ function RowActions({ item, onOpen, onRename, onDelete }) {
   );
 }
 
-function GalleryCard({ item, onOpen }) {
+const GalleryCard = memo(function GalleryCard({ item, onOpen }) {
   const previewUrl = item.type === "file" ? resolveUrl(`/preview?path=${encodeURIComponent(item.path)}`) : "";
   const cardType = item.type === "folder" ? "Folder" : humanFileType(item);
 
@@ -196,7 +196,7 @@ function GalleryCard({ item, onOpen }) {
           <img src={previewUrl} alt={item.name} loading="lazy" />
         ) : isVideoItem(item) ? (
           <>
-            <video src={previewUrl} preload="metadata" muted playsInline />
+            <video src={previewUrl} preload="none" muted playsInline />
             <span className="gallery-thumb__play">Play</span>
           </>
         ) : (
@@ -210,7 +210,7 @@ function GalleryCard({ item, onOpen }) {
       </div>
     </button>
   );
-}
+});
 
 export default function DashboardPage() {
   const { email, signOut, refreshSession } = useAuth();

@@ -1,6 +1,7 @@
+import { memo } from "react";
 import { formatBytes, formatDate, formatPercent, formatTemperature } from "../api/http.js";
 
-export default function StoragePanel({ storage, systemStatus, transferStatus, onStorageRootChange, changingStorageRoot }) {
+function StoragePanel({ storage, systemStatus, transferStatus, onStorageRootChange, changingStorageRoot }) {
   const total = Number(storage?.totalBytes || 0);
   const used = Number(storage?.usedBytes || 0);
   const free = Number(storage?.freeBytes || 0);
@@ -184,3 +185,5 @@ export default function StoragePanel({ storage, systemStatus, transferStatus, on
     </section>
   );
 }
+
+export default memo(StoragePanel);
