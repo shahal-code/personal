@@ -22,7 +22,8 @@ import {
 import { joinRelativePath, resolveStoragePath, ensureSafeName } from "../lib/path.js";
 import { getHlsPlaylist, readHlsStatus, rewriteHlsPlaylist, shouldGenerateHls, startHlsTranscode, getHlsSegmentPath } from "../lib/hls.js";
 import { parseJsonBody, parseRelativePath } from "../utils/validation.js";
-import { getActiveStorageRoot, getStorageRootById } from "../lib/storage-roots.js";
+import { getActiveStorageRoot, getStorageRootById, getStorageRootState } from "../lib/storage-roots.js";
+import { createTransferJob, getTransferJobs } from "../lib/transfer-jobs.js";
 
 const router = Router();
 const upload = multer({ dest: TEMP_DIR, limits: { fileSize: 1024 * 1024 * 1024 * 10 } });
@@ -278,6 +279,8 @@ router.use(
     "/delete",
     "/items",
     "/transfer",
+    "/storage-folders",
+    "/global-search",
   ],
   requireAdmin,
   noStore
@@ -903,46 +906,72 @@ router.delete("/delete", async (req, res) => {
 
 router.post("/transfer", async (req, res) => {
   const body = parseJsonBody(req);
-  const sourceRoot = await getStorageRootById(body.sourceRootId);
-  const destinationRoot = await getStorageRootById(body.destinationRootId);
   const sourceRelative = parseRelativePath(body.path || "");
   const destinationFolder = parseRelativePath(body.destinationPath || "");
-  const operation = body.operation === "move" ? "move" : "copy";
 
   if (!sourceRelative) {
     return res.status(400).json({ message: "Source path is required" });
   }
 
-  const sourceAbsolute = resolveStoragePath(sourceRoot, sourceRelative).absolutePath;
-  const destinationRelative = joinRelativePath(destinationFolder, path.basename(sourceRelative));
-  const destinationAbsolute = resolveStoragePath(destinationRoot, destinationRelative).absolutePath;
+  await getStorageRootById(body.sourceRootId);
+  await getStorageRootById(body.destinationRootId);
+  const job = await createTransferJob({ ...body, path: sourceRelative, destinationPath: destinationFolder });
+  return res.status(202).json({ message: "Transfer queued", job });
+});
 
-  if (sourceAbsolute === destinationAbsolute) {
-    return res.status(400).json({ message: "Source and destination are the same" });
+router.get("/transfer/jobs", async (req, res) => {
+  return res.json({ jobs: await getTransferJobs(req.query.limit) });
+});
+
+router.get("/storage-folders", async (req, res) => {
+  const rootId = String(req.query.rootId || "");
+  const storageRoot = await getStorageRootById(rootId);
+  const currentPath = parseRelativePath(req.query.path || "");
+  const { absolutePath, relativePath } = resolveStoragePath(storageRoot, currentPath);
+  const entries = await fs.readdir(absolutePath, { withFileTypes: true });
+  const folders = entries
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+    .map((entry) => ({ name: entry.name, path: relativePath ? `${relativePath}/${entry.name}` : entry.name }))
+    .sort((left, right) => left.name.localeCompare(right.name, undefined, { numeric: true }));
+  return res.json({ rootId, currentPath: relativePath, folders });
+});
+
+router.get("/global-search", async (req, res) => {
+  const query = String(req.query.q || "").trim().toLowerCase();
+  if (query.length < 2) return res.json({ items: [] });
+  const results = [];
+  const rootState = await getStorageRootState();
+
+  for (const option of rootState.options.filter((root) => root.available)) {
+    const storageRoot = await getStorageRootById(option.id);
+    async function walk(relativePath = "") {
+      if (results.length >= 200) return;
+      const absolute = resolveStoragePath(storageRoot, relativePath).absolutePath;
+      const entries = await fs.readdir(absolute, { withFileTypes: true }).catch(() => []);
+      for (const entry of entries) {
+        if (results.length >= 200) break;
+        if (entry.name.startsWith(".") || entry.name.endsWith(".partial")) continue;
+        const childRelative = relativePath ? `${relativePath}/${entry.name}` : entry.name;
+        if (entry.name.toLowerCase().includes(query)) {
+          const stats = await fs.stat(path.join(absolute, entry.name));
+          results.push({
+            rootId: option.id,
+            rootLabel: option.label,
+            name: entry.name,
+            path: childRelative,
+            displayPath: `/${childRelative}`,
+            type: entry.isDirectory() ? "folder" : "file",
+            size: entry.isFile() ? stats.size : 0,
+            modifiedAt: stats.mtime.toISOString(),
+            extension: entry.isFile() ? path.extname(entry.name).slice(1).toLowerCase() : "",
+          });
+        }
+        if (entry.isDirectory()) await walk(childRelative);
+      }
+    }
+    await walk();
   }
-
-  if (await fs.stat(destinationAbsolute).catch(() => null)) {
-    return res.status(409).json({ message: "An item with this name already exists at the destination" });
-  }
-
-  const sourceStats = await fs.stat(sourceAbsolute);
-  await fs.mkdir(path.dirname(destinationAbsolute), { recursive: true });
-
-  if (sourceStats.isDirectory()) {
-    await fs.cp(sourceAbsolute, destinationAbsolute, { recursive: true, errorOnExist: true });
-  } else {
-    await fs.copyFile(sourceAbsolute, destinationAbsolute, fsSync.constants.COPYFILE_EXCL);
-  }
-
-  if (operation === "move") {
-    await fs.rm(sourceAbsolute, { recursive: sourceStats.isDirectory(), force: false });
-  }
-
-  return res.status(201).json({
-    message: `Item ${operation === "move" ? "moved" : "copied"}`,
-    path: destinationRelative,
-    destinationRootId: body.destinationRootId,
-  });
+  return res.json({ items: results });
 });
 
 router.get("/items", async (req, res) => {

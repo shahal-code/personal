@@ -1228,6 +1228,126 @@ h2 {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.folder-picker {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: rgba(7, 13, 22, 0.58);
+}
+
+.folder-picker__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.folder-picker__header strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.folder-picker__list {
+  display: grid;
+  gap: 6px;
+  max-height: 190px;
+  overflow: auto;
+}
+
+.folder-picker__list button {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+  text-align: left;
+}
+
+.folder-picker small,
+.folder-picker__list > span {
+  color: var(--muted);
+}
+
+.transfer-jobs-panel,
+.global-search-panel {
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: rgba(12, 20, 31, 0.72);
+}
+
+.transfer-job-list,
+.search-results {
+  display: grid;
+  gap: 8px;
+}
+
+.transfer-job {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(7, 13, 22, 0.62);
+}
+
+.transfer-job > div {
+  display: grid;
+  min-width: 0;
+}
+
+.transfer-job span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transfer-job--failed {
+  border-color: rgba(251, 113, 133, 0.35);
+}
+
+.transfer-job--completed {
+  border-color: rgba(52, 211, 153, 0.24);
+}
+
+.global-search-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.global-search-input {
+  font-size: 1.05rem;
+}
+
+.search-result {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  color: var(--text);
+  background: rgba(7, 13, 22, 0.62);
+  text-align: left;
+}
+
+.search-result > span:not(.file-icon) {
+  display: grid;
+  min-width: 0;
+}
+
+.search-result small {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .preview-nav {
   position: absolute;
   z-index: 2;
@@ -1665,7 +1785,7 @@ h2 {
     bottom: 12px;
     z-index: 15;
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(6, 1fr);
     gap: 6px;
     padding: 8px;
     border-radius: 20px;
@@ -1686,13 +1806,25 @@ h2 {
     background: rgba(255, 255, 255, 0.06);
     text-decoration: none;
     font: inherit;
-    font-size: 0.7rem;
+    font-size: 0.64rem;
     font-weight: 800;
     touch-action: manipulation;
   }
 
   .activity-item {
     grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .transfer-job {
+    flex-direction: column;
+  }
+
+  .search-result {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .search-result > span:last-child {
+    grid-column: 2;
   }
 
   .activity-item__client,

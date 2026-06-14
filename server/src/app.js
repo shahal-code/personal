@@ -18,6 +18,7 @@ import { ensureDirectory } from "./lib/files.js";
 import { pruneExpiredTokens } from "./lib/sessions.js";
 import { initializeStorageRoots } from "./lib/storage-roots.js";
 import { auditCompletedMutations } from "./lib/audit.js";
+import { initializeTransferJobs } from "./lib/transfer-jobs.js";
 
 export async function createApp() {
   assertRequiredEnv();
@@ -25,6 +26,7 @@ export async function createApp() {
   await ensureDirectory(STORAGE_ROOT);
   await initializeStorageRoots();
   await pruneExpiredTokens();
+  await initializeTransferJobs();
 
   const app = express();
   app.set("trust proxy", 1);
@@ -97,7 +99,7 @@ export async function createApp() {
     app.use(express.static(clientDist, { index: false, maxAge: "1h" }));
     app.get(/.*/, async (req, res) => {
       if (
-        ["/preview", "/video", "/download", "/files", "/gallery", "/folders", "/upload", "/delete", "/items", "/transfer", "/storage", "/security-activity", "/system-status", "/cpu-status"].some(
+        ["/preview", "/video", "/download", "/files", "/gallery", "/folders", "/upload", "/delete", "/items", "/transfer", "/storage-folders", "/global-search", "/storage", "/security-activity", "/system-status", "/cpu-status"].some(
           (prefix) => req.path === prefix || req.path.startsWith(`${prefix}/`)
         )
       ) {

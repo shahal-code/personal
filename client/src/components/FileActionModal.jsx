@@ -1,4 +1,5 @@
-import { formatBytes, formatDate } from "../api/http.js";
+import { useEffect, useState } from "react";
+import { formatBytes, formatDate, request } from "../api/http.js";
 
 export function FileActionModal({ item, favorite, onClose, onPreview, onDetails, onFavorite, onRename, onTransfer, onDelete }) {
   return (
@@ -45,6 +46,23 @@ export function FileDetailsModal({ item, details, onClose }) {
 export function TransferModal({ item, roots, busy, onClose, onConfirm }) {
   const activeRootId = roots?.activeRootId || "internal";
   const destinations = (roots?.options || []).filter((root) => root.available);
+  const [destinationRootId, setDestinationRootId] = useState(destinations.find((root) => root.id !== activeRootId)?.id || activeRootId);
+  const [currentPath, setCurrentPath] = useState("");
+  const [folders, setFolders] = useState([]);
+  const [loadingFolders, setLoadingFolders] = useState(false);
+  const [conflictPolicy, setConflictPolicy] = useState("keep-both");
+
+  useEffect(() => {
+    let active = true;
+    setLoadingFolders(true);
+    request(`/storage-folders?rootId=${encodeURIComponent(destinationRootId)}&path=${encodeURIComponent(currentPath)}`)
+      .then((payload) => { if (active) setFolders(payload.folders || []); })
+      .catch(() => { if (active) setFolders([]); })
+      .finally(() => { if (active) setLoadingFolders(false); });
+    return () => { active = false; };
+  }, [currentPath, destinationRootId]);
+
+  const parentPath = currentPath.includes("/") ? currentPath.slice(0, currentPath.lastIndexOf("/")) : "";
 
   return (
     <div className="modal-backdrop" role="presentation" onMouseDown={busy ? undefined : onClose}>
@@ -53,7 +71,13 @@ export function TransferModal({ item, roots, busy, onClose, onConfirm }) {
         onSubmit={(event) => {
           event.preventDefault();
           const data = new FormData(event.currentTarget);
-          onConfirm({ operation: data.get("operation"), destinationRootId: data.get("destinationRootId"), destinationPath: data.get("destinationPath") });
+          onConfirm({
+            operation: data.get("operation"),
+            destinationRootId,
+            destinationPath: currentPath,
+            conflictPolicy,
+            renameTo: data.get("renameTo"),
+          });
         }}
         onMouseDown={(event) => event.stopPropagation()}
       >
@@ -62,8 +86,21 @@ export function TransferModal({ item, roots, busy, onClose, onConfirm }) {
           <button className="icon-button" type="button" onClick={onClose} disabled={busy}>Close</button>
         </div>
         <label className="field">Action<select className="text-input" name="operation" defaultValue="copy"><option value="copy">Copy</option><option value="move">Move</option></select></label>
-        <label className="field">Destination storage<select className="text-input" name="destinationRootId" defaultValue={destinations.find((root) => root.id !== activeRootId)?.id || activeRootId}>{destinations.map((root) => <option value={root.id} key={root.id}>{root.label}</option>)}</select></label>
-        <label className="field">Destination folder<input className="text-input" name="destinationPath" placeholder="Leave empty for root" /></label>
+        <label className="field">Destination storage<select className="text-input" value={destinationRootId} onChange={(event) => { setDestinationRootId(event.target.value); setCurrentPath(""); }}>{destinations.map((root) => <option value={root.id} key={root.id}>{root.label}</option>)}</select></label>
+        <div className="folder-picker">
+          <div className="folder-picker__header">
+            <button className="ghost-button" type="button" onClick={() => setCurrentPath(parentPath)} disabled={!currentPath}>Up</button>
+            <strong>/{currentPath}</strong>
+          </div>
+          <div className="folder-picker__list">
+            {loadingFolders ? <span>Loading folders...</span> : folders.length === 0 ? <span>No subfolders</span> : folders.map((folder) => (
+              <button type="button" key={folder.path} onClick={() => setCurrentPath(folder.path)}>DIR {folder.name}</button>
+            ))}
+          </div>
+          <small>Selected destination: /{currentPath}</small>
+        </div>
+        <label className="field">If an item already exists<select className="text-input" value={conflictPolicy} onChange={(event) => setConflictPolicy(event.target.value)}><option value="keep-both">Keep both</option><option value="replace">Replace existing</option><option value="skip">Skip transfer</option><option value="rename">Use a new name</option></select></label>
+        {conflictPolicy === "rename" ? <label className="field">New name<input className="text-input" name="renameTo" defaultValue={item.name} required /></label> : null}
         <div className="modal-actions">
           <button className="secondary-button" type="button" onClick={onClose} disabled={busy}>Cancel</button>
           <button className="primary-button" type="submit" disabled={busy}>{busy ? "Working..." : "Continue"}</button>

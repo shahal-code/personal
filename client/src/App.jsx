@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
 import LoginPage from "./pages/LoginPage.jsx";
 import DashboardPage from "./pages/DashboardPage.jsx";
 import SecurityActivityPage from "./pages/SecurityActivityPage.jsx";
+import GlobalSearchPage from "./pages/GlobalSearchPage.jsx";
 
 function ProtectedRoute({ children }) {
   const { status } = useAuth();
@@ -78,6 +79,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <SecurityActivityPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/app/search"
+        element={
+          <ProtectedRoute>
+            <GlobalSearchPage />
           </ProtectedRoute>
         }
       />

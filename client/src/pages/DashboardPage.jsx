@@ -8,6 +8,7 @@ import FilePreviewModal from "../components/FilePreviewModal.jsx";
 import ConfirmModal from "../components/ConfirmModal.jsx";
 import ToastStack from "../components/ToastStack.jsx";
 import { FileActionModal, FileDetailsModal, TransferModal } from "../components/FileActionModal.jsx";
+import TransferJobsPanel from "../components/TransferJobsPanel.jsx";
 
 const UPLOAD_SESSION_KEY = "phonecloud.uploadSession";
 const UPLOAD_MODE_KEY = "phonecloud.uploadMode";
@@ -238,6 +239,7 @@ export default function DashboardPage() {
   const pauseRequestedRef = useRef(false);
   const messageTimerRef = useRef(null);
   const uploadCompletionRef = useRef(false);
+  const completedTransferJobsRef = useRef(new Set());
   const [directory, setDirectory] = useState({ items: [], currentPath: "/", parentPath: "/" });
   const [gallery, setGallery] = useState({ items: [] });
   const [storage, setStorage] = useState(null);
@@ -283,6 +285,7 @@ export default function DashboardPage() {
   const [transferTarget, setTransferTarget] = useState(null);
   const [toasts, setToasts] = useState([]);
   const [uploadQueue, setUploadQueue] = useState([]);
+  const [transferJobs, setTransferJobs] = useState([]);
 
   const crumbs = useMemo(() => breadcrumbSegments(directory.currentPath), [directory.currentPath]);
   const visibleDirectoryItems = useMemo(() => {
@@ -769,7 +772,7 @@ export default function DashboardPage() {
   async function handleTransfer(payload) {
     setBusy(true);
     try {
-      await request("/transfer", {
+      const response = await request("/transfer", {
         method: "POST",
         body: {
           ...payload,
@@ -778,14 +781,35 @@ export default function DashboardPage() {
         },
       });
       setTransferTarget(null);
-      setMessage(`Item ${payload.operation === "move" ? "moved" : "copied"}`);
-      await loadData(directory.currentPath === "/" ? "" : directory.currentPath.replace(/^\/+/, ""));
+      setTransferJobs((current) => [response.job, ...current]);
+      setMessage("Transfer queued and will continue in the background");
     } catch (requestError) {
       setError(requestError.message || "Unable to transfer item");
     } finally {
       setBusy(false);
     }
   }
+
+  async function loadTransferJobs() {
+    try {
+      const payload = await request("/transfer/jobs?limit=20");
+      const jobs = payload.jobs || [];
+      setTransferJobs(jobs);
+      const newlyCompleted = jobs.filter((job) => job.status === "completed" && !completedTransferJobsRef.current.has(job.id));
+      jobs.filter((job) => job.status === "completed").forEach((job) => completedTransferJobsRef.current.add(job.id));
+      if (newlyCompleted.length > 0) {
+        void loadData(directory.currentPath === "/" ? "" : directory.currentPath.replace(/^\/+/, ""));
+      }
+    } catch {
+      // Keep the latest job state if polling fails.
+    }
+  }
+
+  useEffect(() => {
+    loadTransferJobs();
+    const interval = window.setInterval(loadTransferJobs, 3000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   function handleBulkDelete() {
     if (selectedItems.length > 0) {
@@ -870,6 +894,9 @@ export default function DashboardPage() {
             <h2>Storage dashboard</h2>
           </div>
           <div className="toolbar">
+            <button className="secondary-button" type="button" onClick={() => navigate("/app/search")}>
+              Global Search
+            </button>
             <button className="secondary-button" type="button" onClick={() => navigate("/app/security")}>
               Security Activity
             </button>
@@ -1017,6 +1044,8 @@ export default function DashboardPage() {
             </div>
           </section>
         ) : null}
+
+        <TransferJobsPanel jobs={transferJobs} />
 
         <section id="gallery" className={`gallery-panel ${galleryOpen ? "gallery-panel--open" : ""}`}>
           <div className="gallery-panel__header">
@@ -1209,6 +1238,7 @@ export default function DashboardPage() {
         <a href="#storage">Storage</a>
         <a href="#gallery" onClick={() => setGalleryOpen(true)}>Gallery</a>
         <a href="#files">Files</a>
+        <button type="button" onClick={() => navigate("/app/search")}>Search</button>
         <button type="button" onClick={() => navigate("/app/security")}>Security</button>
         <button type="button" onClick={() => uploadRef.current?.click()} disabled={busy || uploading}>
           Upload
