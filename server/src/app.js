@@ -110,9 +110,10 @@ export async function createApp() {
     });
   } catch {
     app.get(["/", "/login", /^\/app(?:\/.*)?$/], noStore, (req, res) => {
-      return res.status(503).type("text/plain").send(
-        "Phone Cloud frontend is not built on this server. Run: npm run build:client, then restart the server."
-      );
+      return res.json({
+        success: true,
+        message: "Phone Cloud API is running"
+      });
     });
   }
 
