@@ -81,7 +81,11 @@ function getResumableMetaPath(uploadId) {
   return path.join(getResumableSessionPath(uploadId), "meta.json");
 }
 
-function getResumableDataPath(uploadId) {
+function getResumableDataPath(uploadId, storageRoot, meta) {
+  if (storageRoot && meta?.destinationRelative) {
+    const destinationAbsolute = resolveStoragePath(storageRoot, meta.destinationRelative).absolutePath;
+    return path.join(path.dirname(destinationAbsolute), `.${path.basename(destinationAbsolute)}.${uploadId}.partial`);
+  }
   return path.join(getResumableSessionPath(uploadId), "upload.partial");
 }
 
@@ -99,8 +103,8 @@ async function writeResumableMeta(uploadId, meta) {
   await fs.writeFile(getResumableMetaPath(uploadId), JSON.stringify(meta, null, 2), "utf8");
 }
 
-async function getResumableOffset(uploadId) {
-  const stats = await fs.stat(getResumableDataPath(uploadId)).catch(() => null);
+async function getResumableOffset(uploadId, storageRoot, meta) {
+  const stats = await fs.stat(getResumableDataPath(uploadId, storageRoot, meta)).catch(() => null);
   return stats?.isFile() ? stats.size : 0;
 }
 
@@ -420,7 +424,7 @@ router.post("/upload/session", async (req, res) => {
     updatedAt: new Date().toISOString(),
   });
 
-  const offset = await getResumableOffset(uploadId);
+  const offset = await getResumableOffset(uploadId, STORAGE_ROOT, meta);
   return res.status(201).json(buildUploadSessionPayload(uploadId, meta, offset));
 });
 
@@ -444,12 +448,13 @@ router.get("/upload/session/:uploadId", async (req, res) => {
     });
   }
 
-  const offset = await getResumableOffset(uploadId);
+  const offset = await getResumableOffset(uploadId, STORAGE_ROOT, meta);
   return res.json(buildUploadSessionPayload(uploadId, meta, offset));
 });
 
 router.patch("/upload/session/:uploadId", async (req, res) => {
   await ensureRootReady();
+  const STORAGE_ROOT = getActiveStorageRoot();
   const uploadId = ensureSafeUploadId(req.params.uploadId || "");
   const meta = await readResumableMeta(uploadId);
 
@@ -458,7 +463,7 @@ router.patch("/upload/session/:uploadId", async (req, res) => {
   }
 
   const requestedOffset = Number(req.header("Upload-Offset"));
-  const currentOffset = await getResumableOffset(uploadId);
+  const currentOffset = await getResumableOffset(uploadId, STORAGE_ROOT, meta);
 
   if (!Number.isInteger(requestedOffset) || requestedOffset !== currentOffset) {
     res.set("Upload-Offset", String(currentOffset));
@@ -477,8 +482,9 @@ router.patch("/upload/session/:uploadId", async (req, res) => {
     return res.status(413).json({ message: "Upload exceeds expected file size", offset: currentOffset });
   }
 
-  await fs.mkdir(getResumableSessionPath(uploadId), { recursive: true });
-  const writeStream = fsSync.createWriteStream(getResumableDataPath(uploadId), { flags: "a" });
+  const resumableDataPath = getResumableDataPath(uploadId, STORAGE_ROOT, meta);
+  await fs.mkdir(path.dirname(resumableDataPath), { recursive: true });
+  const writeStream = fsSync.createWriteStream(resumableDataPath, { flags: "a", highWaterMark: 1024 * 1024 });
 
   try {
     await pipeline(req, writeStream);
@@ -487,7 +493,7 @@ router.patch("/upload/session/:uploadId", async (req, res) => {
     throw error;
   }
 
-  const savedOffset = await getResumableOffset(uploadId);
+  const savedOffset = await getResumableOffset(uploadId, STORAGE_ROOT, meta);
   if (savedOffset !== nextOffset) {
     res.set("Upload-Offset", String(savedOffset));
     return res.status(500).json({ message: "Upload slice was not fully saved", offset: savedOffset });
@@ -512,7 +518,7 @@ router.post("/upload/session/:uploadId/complete", async (req, res) => {
     return res.status(404).json({ message: "Upload session not found" });
   }
 
-  const offset = await getResumableOffset(uploadId);
+  const offset = await getResumableOffset(uploadId, STORAGE_ROOT, meta);
   if (offset !== Number(meta.totalSize)) {
     return res.status(409).json({ message: "Upload incomplete", offset, totalSize: meta.totalSize });
   }
@@ -524,7 +530,7 @@ router.post("/upload/session/:uploadId/complete", async (req, res) => {
   }
 
   await fs.mkdir(path.dirname(destinationAbsolute), { recursive: true });
-  await moveFileSafe(getResumableDataPath(uploadId), destinationAbsolute);
+  await moveFileSafe(getResumableDataPath(uploadId, STORAGE_ROOT, meta), destinationAbsolute);
   await fs.rm(getResumableSessionPath(uploadId), { recursive: true, force: true }).catch(() => {});
 
   if (!meta.fastUpload && shouldGenerateHls(meta.fileName)) {
@@ -682,10 +688,17 @@ router.post("/upload/stream", async (req, res) => {
 
   await fs.mkdir(path.dirname(destinationAbsolute), { recursive: true });
 
-  const writeStream = fsSync.createWriteStream(tempPath, { flags: "w" });
+  const writeStream = fsSync.createWriteStream(tempPath, { flags: "w", highWaterMark: 1024 * 1024 });
 
   try {
     await pipeline(req, writeStream);
+    const savedStats = await fs.stat(tempPath);
+    if (Number.isFinite(totalSize) && totalSize >= 0 && savedStats.size !== totalSize) {
+      throw Object.assign(
+        new Error(`Upload size mismatch: expected ${totalSize} bytes, saved ${savedStats.size}`),
+        { statusCode: 400 }
+      );
+    }
     await moveFileSafe(tempPath, destinationAbsolute);
 
     if (!fastUpload && shouldGenerateHls(fileName)) {

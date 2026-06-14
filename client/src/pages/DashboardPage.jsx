@@ -934,7 +934,7 @@ export default function DashboardPage() {
             storage={storage}
             systemStatus={systemStatus}
             onStorageRootChange={handleStorageRootChange}
-            changingStorageRoot={changingStorageRoot}
+            changingStorageRoot={changingStorageRoot || uploading || uploadPaused}
             transferStatus={{
               activeUploads: uploading ? uploadFileCount : 0,
               uploadBytesPerSecond: uploading ? uploadSpeed : 0,
