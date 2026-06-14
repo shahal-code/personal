@@ -519,7 +519,7 @@ async function sendChunked(basePath, file, options = {}) {
 }
 
 async function sendResumable(basePath, file, options = {}) {
-  const { headers = {}, signal, onProgress, query = {} } = options;
+  const { headers = {}, signal, onProgress, onSession, query = {} } = options;
   const sessionKey = getUploadSessionKey(query.path || "", file);
   const savedSessions = readUploadSessions();
   let uploadId = savedSessions[sessionKey] || "";
@@ -539,12 +539,15 @@ async function sendResumable(basePath, file, options = {}) {
 
     uploadId = session.uploadId;
     rememberUploadSession(sessionKey, uploadId);
+    onSession?.({ uploadId, sessionKey });
     return session;
   }
 
   let session = uploadId
     ? await request(`${basePath}/session/${encodeURIComponent(uploadId)}`, { signal }).catch(() => null)
     : null;
+
+  if (session && uploadId) onSession?.({ uploadId, sessionKey });
 
   if (!session || session.fileName !== file.name || Number(session.totalSize || 0) !== Number(file.size || 0)) {
     session = await createSession();
@@ -630,6 +633,7 @@ export async function uploadFiles(path, options = {}) {
     headers = {},
     signal,
     onProgress,
+    onUploadSession,
     fastUpload = false,
   } = options;
 
@@ -676,6 +680,7 @@ export async function uploadFiles(path, options = {}) {
             name: file.name,
             fast: fastUpload ? "true" : "false",
           },
+          onSession: onUploadSession,
           onProgress: (progressEvent) => {
             fileLoaded = progressEvent.loaded || 0;
             emitProgress({
@@ -751,7 +756,7 @@ export async function uploadFiles(path, options = {}) {
 }
 
 export async function upload(path, options = {}) {
-  const { body, headers = {}, signal, onProgress, fastUpload = false } = options;
+  const { body, headers = {}, signal, onProgress, onUploadSession, fastUpload = false } = options;
 
   if (!(body instanceof FormData)) {
     return request(path, options);
@@ -759,7 +764,11 @@ export async function upload(path, options = {}) {
 
   const files = Array.from(body.getAll("files"));
   const targetPath = typeof body.get("path") === "string" ? body.get("path") : "";
-  return uploadFiles(path, { files, targetPath, headers, signal, onProgress, fastUpload });
+  return uploadFiles(path, { files, targetPath, headers, signal, onProgress, onUploadSession, fastUpload });
+}
+
+export function clearRememberedUploadSession(sessionKey) {
+  if (sessionKey) forgetUploadSession(sessionKey);
 }
 
 export async function download(path, fallbackName) {

@@ -452,6 +452,19 @@ router.get("/upload/session/:uploadId", async (req, res) => {
   return res.json(buildUploadSessionPayload(uploadId, meta, offset));
 });
 
+router.delete("/upload/session/:uploadId", async (req, res) => {
+  await ensureRootReady();
+  const STORAGE_ROOT = getActiveStorageRoot();
+  const uploadId = ensureSafeUploadId(req.params.uploadId || "");
+  const meta = await readResumableMeta(uploadId);
+
+  if (meta) {
+    await fs.rm(getResumableDataPath(uploadId, STORAGE_ROOT, meta), { force: true }).catch(() => {});
+  }
+  await fs.rm(getResumableSessionPath(uploadId), { recursive: true, force: true }).catch(() => {});
+  return res.json({ message: "Upload session cancelled and partial data removed" });
+});
+
 router.patch("/upload/session/:uploadId", async (req, res) => {
   await ensureRootReady();
   const STORAGE_ROOT = getActiveStorageRoot();

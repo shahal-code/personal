@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { request, upload, formatBytes, formatDate, resolveUrl } from "../api/http.js";
+import { request, upload, clearRememberedUploadSession, formatBytes, formatDate, resolveUrl } from "../api/http.js";
 import { useAuth } from "../context/AuthContext.jsx";
 import StoragePanel from "../components/StoragePanel.jsx";
 import Modal from "../components/Modal.jsx";
@@ -240,6 +240,7 @@ export default function DashboardPage() {
   const messageTimerRef = useRef(null);
   const uploadCompletionRef = useRef(false);
   const completedTransferJobsRef = useRef(new Set());
+  const uploadSessionRef = useRef(null);
   const [directory, setDirectory] = useState({ items: [], currentPath: "/", parentPath: "/" });
   const [gallery, setGallery] = useState({ items: [] });
   const [storage, setStorage] = useState(null);
@@ -531,6 +532,9 @@ export default function DashboardPage() {
         body: formData,
         fastUpload: fastUploadMode,
         signal: uploadController.signal,
+        onUploadSession: (session) => {
+          uploadSessionRef.current = session;
+        },
         onProgress: ({ progress, fileName, phase, chunkIndex, totalChunks, loaded, total }) => {
           setUploadProgress(Math.round(progress * 100));
           setUploadLoadedBytes(Number(loaded || 0));
@@ -627,6 +631,7 @@ export default function DashboardPage() {
         setUploadFileCount(0);
         setUploadQueue([]);
         uploadCompletionRef.current = false;
+        uploadSessionRef.current = null;
         clearUploadSession();
         if (inputElement) {
           inputElement.value = "";
@@ -635,8 +640,14 @@ export default function DashboardPage() {
     }
   }
 
-  function handleCancelUpload() {
+  async function handleCancelUpload() {
     if (uploadPaused && !uploading) {
+      const session = uploadSessionRef.current;
+      if (session?.uploadId) {
+        await request(`/upload/session/${encodeURIComponent(session.uploadId)}`, { method: "DELETE" }).catch(() => {});
+        clearRememberedUploadSession(session.sessionKey);
+        uploadSessionRef.current = null;
+      }
       pauseRequestedRef.current = false;
       uploadFilesRef.current = [];
       uploadPathRef.current = "";
@@ -655,6 +666,17 @@ export default function DashboardPage() {
 
     pauseRequestedRef.current = false;
     uploadAbortRef.current?.abort();
+    const session = uploadSessionRef.current;
+    if (session?.uploadId) {
+      window.setTimeout(() => {
+        request(`/upload/session/${encodeURIComponent(session.uploadId)}`, { method: "DELETE" })
+          .catch(() => {})
+          .finally(() => {
+            clearRememberedUploadSession(session.sessionKey);
+            if (uploadSessionRef.current?.uploadId === session.uploadId) uploadSessionRef.current = null;
+          });
+      }, 300);
+    }
   }
 
   function handlePauseUpload() {
