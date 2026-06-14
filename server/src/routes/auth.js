@@ -16,6 +16,7 @@ import { revokeToken } from "../lib/sessions.js";
 import { getRequestToken } from "../middleware/auth.js";
 import { noStore, rateLimit } from "../middleware/security.js";
 import { isValidEmail, parseJsonBody } from "../utils/validation.js";
+import { recordAuditEvent } from "../lib/audit.js";
 
 const router = Router();
 const loginAttempts = new Map();
@@ -70,6 +71,7 @@ router.post("/login", rateLimit({ windowMs: WINDOW_MS, max: 20, message: "Too ma
   const bucket = getAttemptBucket(req.ip);
 
   if (bucket.count >= MAX_ATTEMPTS) {
+    await recordAuditEvent(req, { type: "login_failed", outcome: "blocked", detail: "Too many login attempts" });
     return res.status(429).json({
       message: "Too many login attempts. Try again later.",
     });
@@ -81,11 +83,13 @@ router.post("/login", rateLimit({ windowMs: WINDOW_MS, max: 20, message: "Too ma
 
   if (!isValidEmail(email) || !password) {
     bucket.count += 1;
+    await recordAuditEvent(req, { type: "login_failed", outcome: "failed", email, detail: "Missing or invalid credentials" });
     return res.status(400).json({ message: "Email and password are required." });
   }
 
   if (email !== ADMIN_EMAIL.toLowerCase()) {
     bucket.count += 1;
+    await recordAuditEvent(req, { type: "login_failed", outcome: "failed", email, detail: "Unknown email" });
     return res.status(401).json({ message: "Invalid credentials." });
   }
 
@@ -94,6 +98,7 @@ router.post("/login", rateLimit({ windowMs: WINDOW_MS, max: 20, message: "Too ma
     : await bcrypt.compare(password, ADMIN_PASSWORD_HASH);
   if (!passwordMatches) {
     bucket.count += 1;
+    await recordAuditEvent(req, { type: "login_failed", outcome: "failed", email, detail: "Invalid password" });
     return res.status(401).json({ message: "Invalid credentials." });
   }
 
@@ -119,6 +124,14 @@ router.post("/login", rateLimit({ windowMs: WINDOW_MS, max: 20, message: "Too ma
 
   setAuthCookie(res, token, expiresAt);
   loginAttempts.delete(req.ip || "unknown");
+  await recordAuditEvent(req, {
+    type: "login_success",
+    outcome: "success",
+    email: ADMIN_EMAIL,
+    sessionId: jti,
+    expiresAt,
+    detail: "Administrator signed in",
+  });
 
   return res.json({
     authenticated: true,
@@ -129,6 +142,8 @@ router.post("/login", rateLimit({ windowMs: WINDOW_MS, max: 20, message: "Too ma
 
 router.post("/logout", async (req, res) => {
   const token = getRequestToken(req);
+  let sessionId = "";
+  let email = "";
 
   if (token) {
     try {
@@ -138,6 +153,8 @@ router.post("/logout", async (req, res) => {
         issuer: "phone-cloud",
       });
       if (decoded?.jti && decoded?.exp) {
+        sessionId = decoded.jti;
+        email = decoded.email || "";
         await revokeToken(decoded.jti, decoded.exp);
       }
     } catch {
@@ -146,6 +163,7 @@ router.post("/logout", async (req, res) => {
   }
 
   clearAuthCookie(res);
+  await recordAuditEvent(req, { type: "logout", outcome: "success", sessionId, email, detail: "Administrator signed out" });
   return res.json({ authenticated: false });
 });
 

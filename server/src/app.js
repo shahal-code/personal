@@ -8,6 +8,7 @@ import authRoutes from "./routes/auth.js";
 import fileRoutes from "./routes/files.js";
 import systemRoutes from "./routes/system.js";
 import storageRoutes from "./routes/storage.js";
+import securityActivityRoutes from "./routes/security-activity.js";
 import { CLIENT_ORIGINS, DATA_DIR, STORAGE_ROOT } from "./config/env.js";
 import { assertRequiredEnv } from "./config/env.js";
 import { notFoundHandler, errorHandler } from "./middleware/error.js";
@@ -16,6 +17,7 @@ import { noStore, rateLimit, requireTrustedOrigin, securityRequestId } from "./m
 import { ensureDirectory } from "./lib/files.js";
 import { pruneExpiredTokens } from "./lib/sessions.js";
 import { initializeStorageRoots } from "./lib/storage-roots.js";
+import { auditCompletedMutations } from "./lib/audit.js";
 
 export async function createApp() {
   assertRequiredEnv();
@@ -70,6 +72,7 @@ export async function createApp() {
   app.use(requireTrustedOrigin);
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+  app.use(auditCompletedMutations);
 
   app.get("/health", noStore, (req, res) => {
     res.json({
@@ -81,6 +84,7 @@ export async function createApp() {
   app.use(fileRoutes);
   app.use(systemRoutes);
   app.use(storageRoutes);
+  app.use(securityActivityRoutes);
 
   const appFile = fileURLToPath(import.meta.url);
   const appDir = path.dirname(appFile);
@@ -93,7 +97,7 @@ export async function createApp() {
     app.use(express.static(clientDist, { index: false, maxAge: "1h" }));
     app.get(/.*/, async (req, res) => {
       if (
-        ["/preview", "/video", "/download", "/files", "/gallery", "/folders", "/upload", "/delete", "/items", "/transfer", "/storage", "/system-status", "/cpu-status"].some(
+        ["/preview", "/video", "/download", "/files", "/gallery", "/folders", "/upload", "/delete", "/items", "/transfer", "/storage", "/security-activity", "/system-status", "/cpu-status"].some(
           (prefix) => req.path === prefix || req.path.startsWith(`${prefix}/`)
         )
       ) {

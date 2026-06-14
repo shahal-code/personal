@@ -73,6 +73,7 @@ button:disabled {
 .storage-panel,
 .directory-panel,
 .gallery-panel,
+.security-panel,
 .sidebar,
 .metric-card,
 .modal-card {
@@ -327,6 +328,7 @@ h2 {
 .topbar,
 .storage-panel,
 .gallery-panel,
+.security-panel,
 .directory-panel {
   border-radius: 28px;
 }
@@ -352,6 +354,7 @@ h2 {
 
 .storage-panel,
 .gallery-panel,
+.security-panel,
 .directory-panel {
   padding: 22px;
   background: rgba(12, 20, 31, 0.72);
@@ -360,6 +363,7 @@ h2 {
 
 .storage-panel__header,
 .gallery-panel__header,
+.security-panel__header,
 .directory-panel__header {
   display: flex;
   align-items: center;
@@ -395,6 +399,113 @@ h2 {
   transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
   content-visibility: auto;
   contain-intrinsic-size: 220px;
+}
+
+.security-panel {
+  border-radius: 28px;
+}
+
+.session-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.session-card {
+  padding: 16px;
+  border: 1px solid rgba(52, 211, 153, 0.2);
+  border-radius: 18px;
+  background: rgba(9, 17, 27, 0.86);
+}
+
+.session-card > div {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 12px;
+}
+
+.session-card dl {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+}
+
+.session-card dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.session-card dt,
+.session-card dd {
+  margin: 0;
+}
+
+.session-card dt,
+.session-card dd,
+.activity-item span,
+.activity-item time {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.session-card dd {
+  color: var(--text);
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.security-events-heading {
+  margin-top: 22px;
+}
+
+.activity-list {
+  display: grid;
+  gap: 8px;
+}
+
+.activity-item {
+  display: grid;
+  grid-template-columns: auto minmax(160px, 1.2fr) minmax(180px, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  background: rgba(7, 13, 22, 0.62);
+}
+
+.activity-item__main,
+.activity-item__client {
+  display: grid;
+  min-width: 0;
+}
+
+.activity-item__main span,
+.activity-item__client span,
+.activity-item__client strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--muted);
+  box-shadow: 0 0 0 4px rgba(142, 160, 184, 0.1);
+}
+
+.activity-dot--success {
+  background: var(--success);
+  box-shadow: 0 0 0 4px rgba(52, 211, 153, 0.12);
+}
+
+.activity-dot--danger {
+  background: var(--danger);
+  box-shadow: 0 0 0 4px rgba(251, 113, 133, 0.12);
 }
 
 .gallery-card:hover {
@@ -1255,6 +1366,7 @@ h2 {
   .storage-panel,
   .directory-panel,
   .gallery-panel,
+  .security-panel,
   .sidebar,
   .metric-card,
   .modal-card {
@@ -1264,6 +1376,7 @@ h2 {
   .topbar,
   .storage-panel,
   .gallery-panel,
+  .security-panel,
   .directory-panel,
   .upload-panel,
   .sidebar {
@@ -1359,6 +1472,7 @@ h2 {
   .topbar,
   .storage-panel__header,
   .gallery-panel__header,
+  .security-panel__header,
   .directory-panel__header,
   .modal-header,
   .modal-actions {
@@ -1538,7 +1652,7 @@ h2 {
     bottom: 12px;
     z-index: 15;
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 6px;
     padding: 8px;
     border-radius: 20px;
@@ -1559,9 +1673,18 @@ h2 {
     background: rgba(255, 255, 255, 0.06);
     text-decoration: none;
     font: inherit;
-    font-size: 0.8rem;
+    font-size: 0.7rem;
     font-weight: 800;
     touch-action: manipulation;
+  }
+
+  .activity-item {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .activity-item__client,
+  .activity-item time {
+    grid-column: 2;
   }
 
   .mobile-nav button:disabled {
@@ -1614,6 +1737,7 @@ h2 {
   .topbar,
   .storage-panel,
   .gallery-panel,
+  .security-panel,
   .directory-panel {
     padding: 16px;
   }
