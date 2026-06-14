@@ -539,24 +539,38 @@ async function sendS3Multipart(basePath, file, options = {}) {
     while (nextIndex < parts.length) {
       const part = parts[nextIndex];
       nextIndex += 1;
+      let etag = "";
+      let attempts = 0;
 
-      const { url } = await request(`${basePath}/s3/multipart/part`, {
-        method: "POST",
-        body: {
-          path: session.path,
-          uploadId: session.uploadId,
-          partNumber: part.partNumber,
-        },
-        signal,
-      });
-
-      const etag = await sendS3Part(url, file.slice(part.start, part.end), {
-        signal,
-        onProgress: (loaded) => {
-          part.loaded = loaded;
+      while (!etag && attempts < 3) {
+        attempts += 1;
+        try {
+          part.loaded = 0;
           emit();
-        },
-      });
+          const { url } = await request(`${basePath}/s3/multipart/part`, {
+            method: "POST",
+            body: {
+              path: session.path,
+              uploadId: session.uploadId,
+              partNumber: part.partNumber,
+            },
+            signal,
+          });
+
+          etag = await sendS3Part(url, file.slice(part.start, part.end), {
+            signal,
+            onProgress: (loaded) => {
+              part.loaded = loaded;
+              emit();
+            },
+          });
+        } catch (error) {
+          if (!isRetryableUploadError(error) || attempts >= 3) {
+            throw error;
+          }
+          await delay(600 * attempts);
+        }
+      }
 
       part.loaded = part.end - part.start;
       completedParts.push({ ETag: etag, PartNumber: part.partNumber });

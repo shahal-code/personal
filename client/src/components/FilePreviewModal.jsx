@@ -370,7 +370,7 @@ export default function FilePreviewModal({ item, onClose, onPrevious, onNext, ha
                 autoPlay
                 playsInline
                 muted={false}
-                preload="metadata"
+                preload={isLocalPreview ? "auto" : "metadata"}
                 onError={handleVideoError}
                 onStalled={handleVideoStalled}
                 onClick={(event) => event.stopPropagation()}
