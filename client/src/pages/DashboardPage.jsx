@@ -112,6 +112,11 @@ function isVideoItem(item) {
   return ["mp4", "m4v", "mov", "webm"].includes((item?.extension || "").toLowerCase());
 }
 
+function fileExtension(name) {
+  const lastDot = String(name || "").lastIndexOf(".");
+  return lastDot >= 0 ? String(name).slice(lastDot + 1).toLowerCase() : "";
+}
+
 function galleryKind(item) {
   if (item.type === "folder") return "folders";
   if (isImageItem(item)) return "images";
@@ -275,6 +280,7 @@ export default function DashboardPage() {
   const [folderModalOpen, setFolderModalOpen] = useState(false);
   const [folderName, setFolderName] = useState("");
   const [previewTarget, setPreviewTarget] = useState(null);
+  const [uploadPreview, setUploadPreview] = useState(null);
   const [changingStorageRoot, setChangingStorageRoot] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [favorites, setFavorites] = useState(readFavorites);
@@ -316,6 +322,14 @@ export default function DashboardPage() {
     () => directory.items.filter((item) => selectedPaths.includes(item.path)),
     [directory.items, selectedPaths]
   );
+
+  useEffect(() => {
+    return () => {
+      if (uploadPreview?.url) {
+        URL.revokeObjectURL(uploadPreview.url);
+      }
+    };
+  }, [uploadPreview?.url]);
 
   async function loadData(path = "") {
     setLoading(true);
@@ -521,6 +535,29 @@ export default function DashboardPage() {
     setUploadPhase("Uploading");
     setRestoredUpload(null);
     setError("");
+    setUploadPreview((current) => {
+      if (current?.url) URL.revokeObjectURL(current.url);
+      const mediaFile = files.find((file) => {
+        const extension = fileExtension(file.name);
+        return ["mp4", "m4v", "mov", "webm", "jpg", "jpeg", "png", "gif", "webp", "bmp", "svg"].includes(extension);
+      });
+      if (!mediaFile) return null;
+      const extension = fileExtension(mediaFile.name);
+      const destinationPath = uploadPath ? `${uploadPath}/${mediaFile.name}` : mediaFile.name;
+      return {
+        url: URL.createObjectURL(mediaFile),
+        item: {
+          name: mediaFile.name,
+          path: destinationPath,
+          displayPath: `Local preview · /${destinationPath}`,
+          type: "file",
+          size: mediaFile.size,
+          extension,
+          modifiedAt: new Date(mediaFile.lastModified || Date.now()).toISOString(),
+          createdAt: new Date().toISOString(),
+        },
+      };
+    });
     uploadCompletionRef.current = false;
 
     const formData = new FormData();
@@ -974,6 +1011,11 @@ export default function DashboardPage() {
               </span>
               <div className="upload-panel__controls">
                 <strong>{uploadProgress}%</strong>
+                {uploadPreview?.item ? (
+                  <button className="ghost-button" type="button" onClick={() => setPreviewTarget(uploadPreview.item)}>
+                    Preview now
+                  </button>
+                ) : null}
                 {uploadPaused ? (
                   <button className="ghost-button" type="button" onClick={handleResumeUpload}>
                     Resume
@@ -1340,9 +1382,10 @@ export default function DashboardPage() {
       />
 
       {previewTarget ? (
-        <FilePreviewModal
-          item={previewTarget}
+          <FilePreviewModal
+            item={previewTarget}
           onClose={() => setPreviewTarget(null)}
+          localPreviewUrl={uploadPreview?.item?.path === previewTarget.path ? uploadPreview.url : ""}
           hasPrevious={previewMediaIndex > 0}
           hasNext={previewMediaIndex >= 0 && previewMediaIndex < galleryMedia.length - 1}
           onPrevious={() => setPreviewTarget(galleryMedia[previewMediaIndex - 1])}

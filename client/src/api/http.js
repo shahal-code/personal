@@ -10,7 +10,10 @@ const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/+$/, "
 // request and save overhead for large public-domain uploads.
 const CHUNK_SIZE = 64 * 1024 * 1024;
 const S3_MULTIPART_PART_SIZE = 64 * 1024 * 1024;
-const S3_MULTIPART_CONCURRENCY = 6;
+const S3_MULTIPART_CONCURRENCY = Math.max(
+  1,
+  Math.min(12, Number(import.meta.env.VITE_S3_MULTIPART_CONCURRENCY || 8))
+);
 const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024;
 const STREAM_LARGE_UPLOADS_SETTING = import.meta.env.VITE_STREAM_LARGE_UPLOADS || "auto";
 const UPLOAD_SESSION_STORAGE_KEY = "phonecloud.resumableUploads";

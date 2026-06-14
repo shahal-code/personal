@@ -30,7 +30,7 @@ function getPreviewKind(item) {
   return "generic";
 }
 
-export default function FilePreviewModal({ item, onClose, onPrevious, onNext, hasPrevious, hasNext }) {
+export default function FilePreviewModal({ item, onClose, onPrevious, onNext, hasPrevious, hasNext, localPreviewUrl = "" }) {
   const kind = useMemo(() => getPreviewKind(item), [item]);
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
@@ -43,7 +43,7 @@ export default function FilePreviewModal({ item, onClose, onPrevious, onNext, ha
   const [hlsModule, setHlsModule] = useState(null);
   const [downloading, setDownloading] = useState(false);
   const [videoError, setVideoError] = useState(false);
-  const previewUrl = resolveUrl(`/preview?path=${encodeURIComponent(item.path)}`);
+  const previewUrl = localPreviewUrl || resolveUrl(`/preview?path=${encodeURIComponent(item.path)}`);
   const directVideoUrl = previewUrl;
   const hlsUrl = resolveUrl(`/preview/hls?path=${encodeURIComponent(item.path)}`);
   const supportsNativeHls = useMemo(() => {
