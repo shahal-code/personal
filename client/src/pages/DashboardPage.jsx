@@ -831,7 +831,7 @@ export default function DashboardPage() {
         </div>
 
         {uploading || uploadPaused ? (
-          <section className="upload-panel" aria-live="polite">
+          <section className="upload-panel upload-panel--active" aria-live="polite">
             <div className="upload-panel__header">
               <span>
                 {uploadFileName
