@@ -24,6 +24,10 @@ function getCandidatePaths(rootId, rootPath) {
   if (rootPath) candidates.push(rootPath);
 
   if (rootId === "sd") {
+    const mountId = String(rootPath || "").match(/(?:^|\/)([0-9A-Fa-f]{4}-[0-9A-Fa-f]{4})(?:\/|$)/)?.[1];
+    if (mountId) {
+      candidates.push(`/storage/${mountId}`);
+    }
     candidates.push(
       path.join(os.homedir(), "storage", "external-1"),
       path.join(os.homedir(), "storage", "external")
@@ -39,6 +43,8 @@ async function inspectRoot(rootId, rootPath) {
   }
 
   let lastError = rootPath ? "path is not accessible" : "not configured";
+  const availableCandidates = [];
+
   for (const candidate of getCandidatePaths(rootId, rootPath)) {
     try {
       const stats = await fs.stat(candidate);
@@ -48,10 +54,32 @@ async function inspectRoot(rootId, rootPath) {
       }
 
       await fs.access(candidate);
-      return { available: true, resolvedPath: candidate, error: "" };
+      const resolvedPath = await fs.realpath(candidate).catch(() => candidate);
+      const entries = await fs.readdir(candidate, { withFileTypes: true });
+      const visibleEntryCount = entries.filter((entry) => !entry.name.startsWith(".")).length;
+      availableCandidates.push({
+        path: candidate,
+        resolvedPath,
+        visibleEntryCount,
+      });
     } catch (error) {
       lastError = error?.code || error?.message || "path is not accessible";
     }
+  }
+
+  if (availableCandidates.length > 0) {
+    const selected = [...availableCandidates].sort(
+      (left, right) => right.visibleEntryCount - left.visibleEntryCount
+    )[0];
+
+    return {
+      available: true,
+      resolvedPath: selected.resolvedPath,
+      displayPath: selected.path,
+      visibleEntryCount: selected.visibleEntryCount,
+      candidates: availableCandidates,
+      error: "",
+    };
   }
 
   return { available: false, resolvedPath: rootPath || "", error: lastError };

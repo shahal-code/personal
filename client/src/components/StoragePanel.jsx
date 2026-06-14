@@ -77,6 +77,12 @@ function StoragePanel({ storage, systemStatus, transferStatus, onStorageRootChan
           </span>
         </div>
       ) : null}
+      {storage?.roots?.activeRootId === "sd" ? (
+        <div className="active-storage-path">
+          <span>Reading SD card from</span>
+          <strong>{storage.roots.options.find((option) => option.id === "sd")?.displayPath || storage.roots.options.find((option) => option.id === "sd")?.resolvedPath}</strong>
+        </div>
+      ) : null}
       <div className="warning-list">
         {lowStorage ? (
           <div className="storage-warning storage-warning--danger">
