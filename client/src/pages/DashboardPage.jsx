@@ -8,7 +8,6 @@ import FilePreviewModal from "../components/FilePreviewModal.jsx";
 import ConfirmModal from "../components/ConfirmModal.jsx";
 import ToastStack from "../components/ToastStack.jsx";
 import { FileActionModal, FileDetailsModal, TransferModal } from "../components/FileActionModal.jsx";
-import SecurityActivityPanel from "../components/SecurityActivityPanel.jsx";
 
 const UPLOAD_SESSION_KEY = "phonecloud.uploadSession";
 const UPLOAD_MODE_KEY = "phonecloud.uploadMode";
@@ -284,8 +283,6 @@ export default function DashboardPage() {
   const [transferTarget, setTransferTarget] = useState(null);
   const [toasts, setToasts] = useState([]);
   const [uploadQueue, setUploadQueue] = useState([]);
-  const [securityActivity, setSecurityActivity] = useState({ activeSessions: [], events: [] });
-  const [securityLoading, setSecurityLoading] = useState(false);
 
   const crumbs = useMemo(() => breadcrumbSegments(directory.currentPath), [directory.currentPath]);
   const visibleDirectoryItems = useMemo(() => {
@@ -354,17 +351,6 @@ export default function DashboardPage() {
     }
   }
 
-  async function loadSecurityActivity() {
-    setSecurityLoading(true);
-    try {
-      setSecurityActivity(await request("/security-activity?limit=200"));
-    } catch (requestError) {
-      setError(requestError.message || "Unable to load security activity");
-    } finally {
-      setSecurityLoading(false);
-    }
-  }
-
   async function handleStorageRootChange(rootId) {
     setChangingStorageRoot(true);
     setError("");
@@ -402,12 +388,6 @@ export default function DashboardPage() {
   useEffect(() => {
     loadSystemStatus();
     const interval = window.setInterval(loadSystemStatus, 5000);
-    return () => window.clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    loadSecurityActivity();
-    const interval = window.setInterval(loadSecurityActivity, 15000);
     return () => window.clearInterval(interval);
   }, []);
 
@@ -890,6 +870,9 @@ export default function DashboardPage() {
             <h2>Storage dashboard</h2>
           </div>
           <div className="toolbar">
+            <button className="secondary-button" type="button" onClick={() => navigate("/app/security")}>
+              Security Activity
+            </button>
             <button className="secondary-button" type="button" onClick={() => setFolderModalOpen(true)} disabled={busy}>
               New folder
             </button>
@@ -1220,14 +1203,13 @@ export default function DashboardPage() {
           )}
         </section>
 
-        <SecurityActivityPanel activity={securityActivity} loading={securityLoading} onRefresh={loadSecurityActivity} />
       </main>
 
       <nav className="mobile-nav" aria-label="Mobile navigation">
         <a href="#storage">Storage</a>
         <a href="#gallery" onClick={() => setGalleryOpen(true)}>Gallery</a>
         <a href="#files">Files</a>
-        <a href="#security">Security</a>
+        <button type="button" onClick={() => navigate("/app/security")}>Security</button>
         <button type="button" onClick={() => uploadRef.current?.click()} disabled={busy || uploading}>
           Upload
         </button>

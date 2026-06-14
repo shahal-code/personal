@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
 import LoginPage from "./pages/LoginPage.jsx";
 import DashboardPage from "./pages/DashboardPage.jsx";
+import SecurityActivityPage from "./pages/SecurityActivityPage.jsx";
 
 function ProtectedRoute({ children }) {
   const { status } = useAuth();
@@ -69,6 +70,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <DashboardPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/app/security"
+        element={
+          <ProtectedRoute>
+            <SecurityActivityPage />
           </ProtectedRoute>
         }
       />

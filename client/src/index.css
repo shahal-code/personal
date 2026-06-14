@@ -361,6 +361,14 @@ h2 {
   contain: layout paint;
 }
 
+.standalone-page {
+  min-height: 100svh;
+  display: grid;
+  align-content: start;
+  gap: 22px;
+  padding: 22px;
+}
+
 .storage-panel__header,
 .gallery-panel__header,
 .security-panel__header,
@@ -1442,6 +1450,11 @@ h2 {
   .file-table {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
+  }
+
+  .standalone-page {
+    gap: 14px;
+    padding: 12px;
   }
 
   .file-row {
