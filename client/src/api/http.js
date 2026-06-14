@@ -12,7 +12,11 @@ const CHUNK_SIZE = 64 * 1024 * 1024;
 const S3_MULTIPART_PART_SIZE = 64 * 1024 * 1024;
 const S3_MULTIPART_CONCURRENCY = Math.max(
   1,
-  Math.min(12, Number(import.meta.env.VITE_S3_MULTIPART_CONCURRENCY || 8))
+  Math.min(12, Number(import.meta.env.VITE_S3_MULTIPART_CONCURRENCY || 6))
+);
+const S3_MULTIPART_LIVE_PREVIEW_CONCURRENCY = Math.max(
+  1,
+  Math.min(S3_MULTIPART_CONCURRENCY, Number(import.meta.env.VITE_S3_MULTIPART_LIVE_PREVIEW_CONCURRENCY || 3))
 );
 const S3_MULTIPART_PART_RETRIES = Math.max(
   3,
@@ -502,7 +506,7 @@ function sendS3Part(url, blob, options = {}) {
 }
 
 async function sendS3Multipart(basePath, file, options = {}) {
-  const { signal, targetPath = "", onProgress } = options;
+  const { signal, targetPath = "", onProgress, concurrency = S3_MULTIPART_CONCURRENCY } = options;
   const session = await request(`${basePath}/s3/multipart/create`, {
     method: "POST",
     body: {
@@ -583,7 +587,7 @@ async function sendS3Multipart(basePath, file, options = {}) {
   }
 
   try {
-    await Promise.all(Array.from({ length: Math.min(S3_MULTIPART_CONCURRENCY, parts.length) }, () => worker()));
+    await Promise.all(Array.from({ length: Math.min(concurrency, parts.length) }, () => worker()));
   } catch (error) {
     await request(`${basePath}/s3/multipart/abort`, {
       method: "POST",
@@ -918,6 +922,7 @@ export async function uploadFiles(path, options = {}) {
         payload = await sendS3Multipart(s3BasePath, file, {
           signal,
           targetPath,
+          concurrency: fastUpload ? S3_MULTIPART_CONCURRENCY : S3_MULTIPART_LIVE_PREVIEW_CONCURRENCY,
           onProgress: (progressEvent) => {
             fileLoaded = progressEvent.loaded || 0;
             emitProgress({

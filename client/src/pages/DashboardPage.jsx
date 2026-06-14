@@ -1034,8 +1034,8 @@ export default function DashboardPage() {
               {uploadFileCount > 1
                 ? `Uploading ${uploadFileCount} files — ${fastUploadMode ? "fast upload mode on" : "live preview mode on"}`
                 : fastUploadMode
-                  ? "Fast upload mode is on. HLS/extra preview work is skipped until after upload."
-                  : "Live preview mode is on. Upload may be slower because the server keeps preview support active."}
+                  ? "Fast upload mode is on. Upload uses maximum S3 parallelism."
+                  : "Live preview mode is on. Upload leaves bandwidth for watching already uploaded videos."}
             </p>
             <div className="progress-track">
               <div
