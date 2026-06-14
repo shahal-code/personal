@@ -225,6 +225,7 @@ function sendChunk(path, blob, options = {}) {
             loaded: event.loaded,
             total: event.total,
             progress: event.total > 0 ? event.loaded / event.total : 0,
+            phase: event.loaded === event.total ? "Saving" : "Uploading",
           });
         }
       }
@@ -305,6 +306,7 @@ function sendStream(path, blob, options = {}) {
             loaded: event.loaded,
             total: event.total,
             progress: event.total > 0 ? event.loaded / event.total : 0,
+            phase: event.loaded === event.total ? "Saving" : "Uploading",
           });
         }
       }
@@ -680,6 +682,7 @@ export async function uploadFiles(path, options = {}) {
               fileLoaded = progressEvent.loaded || 0;
               emitProgress({
                 chunkProgress: progressEvent.total > 0 ? fileLoaded / progressEvent.total : 0,
+                phase: progressEvent.phase,
               });
             },
           });
