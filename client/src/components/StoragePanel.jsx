@@ -54,7 +54,12 @@ function StoragePanel({ storage, systemStatus, transferStatus, onStorageRootChan
             disabled={changingStorageRoot}
           >
             {(storage?.roots?.options || []).map((option) => (
-              <option key={option.id} value={option.id} disabled={!option.available}>
+              <option
+                key={option.id}
+                value={option.id}
+                disabled={!option.available}
+                title={option.available ? option.resolvedPath : `${option.configuredPath || "No path"}: ${option.error || "unavailable"}`}
+              >
                 {option.label}{option.available ? "" : option.configured ? " (not mounted)" : " (not configured)"}
               </option>
             ))}
@@ -62,6 +67,16 @@ function StoragePanel({ storage, systemStatus, transferStatus, onStorageRootChan
           <span className="status-pill">{usedPercent}% used</span>
         </div>
       </div>
+      {storage?.roots?.options?.find((option) => option.id === "sd" && !option.available) ? (
+        <div className="storage-warning">
+          <strong>SD card unavailable</strong>
+          <span>
+            {storage.roots.options.find((option) => option.id === "sd").configuredPath || "SD_STORAGE_ROOT not loaded"}
+            {" - "}
+            {storage.roots.options.find((option) => option.id === "sd").error || "check Termux storage permission"}
+          </span>
+        </div>
+      ) : null}
       <div className="warning-list">
         {lowStorage ? (
           <div className="storage-warning storage-warning--danger">
