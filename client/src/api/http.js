@@ -371,6 +371,71 @@ function sendStream(path, blob, options = {}) {
   });
 }
 
+function sendDirectPut(url, blob, options = {}) {
+  const { headers = {}, signal, onProgress } = options;
+  let lastProgressUpdate = 0;
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", url, true);
+    xhr.responseType = "text";
+
+    Object.entries(headers).forEach(([key, value]) => {
+      xhr.setRequestHeader(key, value);
+    });
+
+    if (signal) {
+      if (signal.aborted) {
+        xhr.abort();
+        reject(normalizeError("Upload cancelled", 0));
+        return;
+      }
+
+      signal.addEventListener(
+        "abort",
+        () => {
+          xhr.abort();
+          reject(normalizeError("Upload cancelled", 0));
+        },
+        { once: true }
+      );
+    }
+
+    xhr.upload.onprogress = (event) => {
+      if (typeof onProgress === "function" && event.lengthComputable) {
+        const now = Date.now();
+        if (now - lastProgressUpdate >= 100 || event.loaded === event.total) {
+          lastProgressUpdate = now;
+          onProgress({
+            loaded: event.loaded,
+            total: event.total,
+            progress: event.total > 0 ? event.loaded / event.total : 0,
+            phase: event.loaded === event.total ? "Saving" : "Uploading",
+          });
+        }
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(normalizeError(xhr.responseText || xhr.statusText || "Upload failed", xhr.status));
+        return;
+      }
+      resolve();
+    };
+
+    xhr.onerror = () => {
+      reject(normalizeError("Upload network error. The browser lost the connection before S3 returned a response.", xhr.status || 0));
+    };
+
+    xhr.onabort = () => {
+      reject(normalizeError("Upload cancelled", xhr.status || 0));
+    };
+
+    xhr.send(blob);
+  });
+}
+
 function sendUploadSlice(path, blob, options = {}) {
   const { headers = {}, signal, onProgress, uploadOffset = 0 } = options;
   let lastProgressUpdate = 0;
@@ -668,8 +733,38 @@ export async function uploadFiles(path, options = {}) {
     let lastError = null;
     const maxRetries = 2;
     const useChunkedUpload = file.size > LARGE_FILE_THRESHOLD && !shouldStreamLargeUploads();
+    const s3Presign = await request(`${path.replace(/\/+$/, "")}/s3/presign`, {
+      method: "POST",
+      body: {
+        path: targetPath,
+        name: file.name,
+        size: file.size,
+        type: file.type || "application/octet-stream",
+      },
+      signal,
+    }).catch((error) => {
+      if (error?.status === 400 || error?.status === 404) return null;
+      throw error;
+    });
 
-    if (useChunkedUpload) {
+    if (s3Presign?.mode === "s3" && s3Presign.url) {
+      await sendDirectPut(s3Presign.url, file, {
+        headers: s3Presign.headers || { "Content-Type": file.type || "application/octet-stream" },
+        signal,
+        onProgress: (progressEvent) => {
+          fileLoaded = progressEvent.loaded || 0;
+          emitProgress({
+            chunkProgress: progressEvent.total > 0 ? fileLoaded / progressEvent.total : 0,
+            phase: progressEvent.phase,
+          });
+        },
+      });
+      payload = await request(`${path.replace(/\/+$/, "")}/s3/complete`, {
+        method: "POST",
+        body: { path: s3Presign.path },
+        signal,
+      });
+    } else if (useChunkedUpload) {
       // Large file → chunked upload (bypasses Cloudflare 100MB limit)
       try {
         payload = await sendResumable(path, file, {

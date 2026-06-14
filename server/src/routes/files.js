@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import express, { Router } from "express";
 import multer from "multer";
 import { pipeline } from "node:stream/promises";
-import { TEMP_DIR } from "../config/env.js";
+import { STORAGE_DRIVER, TEMP_DIR } from "../config/env.js";
 import { requireAdmin } from "../middleware/auth.js";
 import { noStore } from "../middleware/security.js";
 import {
@@ -24,6 +24,16 @@ import { getHlsPlaylist, readHlsStatus, rewriteHlsPlaylist, shouldGenerateHls, s
 import { parseJsonBody, parseRelativePath } from "../utils/validation.js";
 import { getActiveStorageRoot, getStorageRootById, getStorageRootState } from "../lib/storage-roots.js";
 import { createTransferJob, getTransferJobs } from "../lib/transfer-jobs.js";
+import {
+  s3CreateFolder,
+  s3CreateReadUrl,
+  s3CreateUploadUrl,
+  s3DeleteEntry,
+  s3FileExists,
+  s3GetFileInfo,
+  s3ListAllItems,
+  s3ListDirectory,
+} from "../lib/s3-storage.js";
 
 const router = Router();
 const upload = multer({ dest: TEMP_DIR, limits: { fileSize: 1024 * 1024 * 1024 * 10 } });
@@ -32,6 +42,7 @@ const chunkSessionRoot = path.join(TEMP_DIR, "chunk-sessions");
 const streamUploadRoot = path.join(TEMP_DIR, "stream-uploads");
 const resumableUploadRoot = path.join(TEMP_DIR, "resumable-uploads");
 const UPLOAD_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+const USE_S3_STORAGE = STORAGE_DRIVER === "s3";
 
 function ensureSafeUploadId(uploadId) {
   const safeUploadId = ensureSafeName(uploadId);
@@ -252,6 +263,10 @@ async function getChunkSessionState(sessionPath) {
 }
 
 async function ensureRootReady() {
+  if (USE_S3_STORAGE) {
+    await ensureDirectory(TEMP_DIR);
+    return;
+  }
   await ensureDirectory(getActiveStorageRoot());
   await ensureDirectory(TEMP_DIR);
   await ensureDirectory(streamUploadRoot);
@@ -292,6 +307,9 @@ router.use(
 
 router.get("/files", async (req, res) => {
   await ensureRootReady();
+  if (USE_S3_STORAGE) {
+    return res.json(await s3ListDirectory(req.query.path || ""));
+  }
   const STORAGE_ROOT = getActiveStorageRoot();
   const currentPath = parseRelativePath(req.query.path || "");
   const payload = await listDirectory(STORAGE_ROOT, currentPath);
@@ -300,6 +318,9 @@ router.get("/files", async (req, res) => {
 
 router.get("/gallery", async (req, res) => {
   await ensureRootReady();
+  if (USE_S3_STORAGE) {
+    return res.json(await s3ListAllItems());
+  }
   const STORAGE_ROOT = getActiveStorageRoot();
   const payload = await listAllItems(STORAGE_ROOT);
   return res.json(payload);
@@ -307,11 +328,15 @@ router.get("/gallery", async (req, res) => {
 
 router.post("/folders", async (req, res) => {
   await ensureRootReady();
-  const STORAGE_ROOT = getActiveStorageRoot();
   const body = parseJsonBody(req);
   const parentPath = parseRelativePath(body.path || "");
   const folderName = body.name;
+  if (USE_S3_STORAGE) {
+    const created = await s3CreateFolder(parentPath, folderName);
+    return res.status(201).json({ message: "Folder created", folder: created });
+  }
 
+  const STORAGE_ROOT = getActiveStorageRoot();
   const created = await createFolder(STORAGE_ROOT, parentPath, folderName);
   return res.status(201).json({
     message: "Folder created",
@@ -321,6 +346,9 @@ router.post("/folders", async (req, res) => {
 
 router.patch("/files", async (req, res) => {
   await ensureRootReady();
+  if (USE_S3_STORAGE) {
+    return res.status(501).json({ message: "Rename is not available for S3 storage yet" });
+  }
   const STORAGE_ROOT = getActiveStorageRoot();
   const body = parseJsonBody(req);
   const targetPath = parseRelativePath(body.path || "");
@@ -333,8 +361,66 @@ router.patch("/files", async (req, res) => {
   });
 });
 
+router.post("/upload/s3/presign", async (req, res) => {
+  await ensureRootReady();
+  if (!USE_S3_STORAGE) {
+    return res.status(400).json({ message: "S3 storage is not enabled" });
+  }
+
+  const body = parseJsonBody(req);
+  const targetPath = parseRelativePath(body.path || "");
+  const fileName = ensureSafeName(body.name || "");
+  const size = Number(body.size || 0);
+  const contentType = String(body.type || "application/octet-stream");
+  const destinationRelative = joinRelativePath(targetPath, fileName);
+
+  if (!fileName) return res.status(400).json({ message: "File name is required" });
+  if (!Number.isFinite(size) || size <= 0) return res.status(400).json({ message: "File size is required" });
+  if (await s3FileExists(destinationRelative)) {
+    return res.status(409).json({ message: `File already exists: ${fileName}` });
+  }
+
+  return res.json({
+    mode: "s3",
+    method: "PUT",
+    url: await s3CreateUploadUrl(destinationRelative, contentType),
+    path: destinationRelative,
+    headers: {
+      "Content-Type": contentType,
+    },
+  });
+});
+
+router.post("/upload/s3/complete", async (req, res) => {
+  await ensureRootReady();
+  if (!USE_S3_STORAGE) {
+    return res.status(400).json({ message: "S3 storage is not enabled" });
+  }
+
+  const body = parseJsonBody(req);
+  const relativePath = parseRelativePath(body.path || "");
+  const item = await s3GetFileInfo(relativePath);
+  return res.status(201).json({
+    message: "Upload complete",
+    uploaded: [
+      {
+        name: path.posix.basename(relativePath),
+        path: relativePath,
+        size: item.size,
+        modifiedAt: item.updatedAt,
+        createdAt: item.createdAt,
+        type: "file",
+        extension: item.extension,
+      },
+    ],
+  });
+});
+
 router.post("/upload", upload.array("files"), async (req, res) => {
   await ensureRootReady();
+  if (USE_S3_STORAGE) {
+    return res.status(400).json({ message: "Use direct S3 upload for this storage driver" });
+  }
   const STORAGE_ROOT = getActiveStorageRoot();
   const targetPath = parseRelativePath(req.body?.path || "");
   const { absolutePath: targetDirectory } = resolveStoragePath(STORAGE_ROOT, targetPath);
@@ -375,6 +461,9 @@ router.post("/upload", upload.array("files"), async (req, res) => {
 
 router.post("/upload/session", async (req, res) => {
   await ensureRootReady();
+  if (USE_S3_STORAGE) {
+    return res.status(400).json({ message: "Use direct S3 upload for this storage driver" });
+  }
   const STORAGE_ROOT = getActiveStorageRoot();
   const body = parseJsonBody(req);
   const targetPath = parseRelativePath(body.path || "");
@@ -563,6 +652,9 @@ router.post("/upload/session/:uploadId/complete", async (req, res) => {
 
 router.post("/upload/chunk", chunkUpload, async (req, res) => {
   await ensureRootReady();
+  if (USE_S3_STORAGE) {
+    return res.status(400).json({ message: "Use direct S3 upload for this storage driver" });
+  }
   const STORAGE_ROOT = getActiveStorageRoot();
 
   const targetPath = parseRelativePath(req.query.path || "");
@@ -666,6 +758,9 @@ router.post("/upload/chunk", chunkUpload, async (req, res) => {
 
 router.post("/upload/stream", async (req, res) => {
   await ensureRootReady();
+  if (USE_S3_STORAGE) {
+    return res.status(400).json({ message: "Use direct S3 upload for this storage driver" });
+  }
   const STORAGE_ROOT = getActiveStorageRoot();
 
   const targetPath = parseRelativePath(req.query.path || "");
@@ -804,6 +899,10 @@ router.get("/video/transcode/status", async (req, res) => {
 
 router.get("/download", async (req, res) => {
   await ensureRootReady();
+  if (USE_S3_STORAGE) {
+    const relativePath = parseRelativePath(req.query.path || "");
+    return res.redirect(await s3CreateReadUrl(relativePath, true));
+  }
   const STORAGE_ROOT = getActiveStorageRoot();
   const relativePath = parseRelativePath(req.query.path || "");
   const { absolutePath } = resolveStoragePath(STORAGE_ROOT, relativePath);
@@ -820,6 +919,10 @@ router.get("/download", async (req, res) => {
 
 router.get("/preview", async (req, res) => {
   await ensureRootReady();
+  if (USE_S3_STORAGE) {
+    const relativePath = parseRelativePath(req.query.path || "");
+    return res.redirect(await s3CreateReadUrl(relativePath, false));
+  }
   const STORAGE_ROOT = getActiveStorageRoot();
   const relativePath = parseRelativePath(req.query.path || "");
   const { absolutePath } = resolveStoragePath(STORAGE_ROOT, relativePath);
@@ -840,6 +943,9 @@ router.get("/preview", async (req, res) => {
 
 router.get("/preview/live", async (req, res) => {
   await ensureRootReady();
+  if (USE_S3_STORAGE) {
+    return res.status(404).json({ message: "Live preview is not available for S3 storage" });
+  }
   const STORAGE_ROOT = getActiveStorageRoot();
   const relativePath = parseRelativePath(req.query.path || "");
   const { absolutePath: finalPath } = resolveStoragePath(STORAGE_ROOT, relativePath);
@@ -887,6 +993,9 @@ router.get("/preview/live", async (req, res) => {
 
 router.get("/preview/hls", async (req, res) => {
   await ensureRootReady();
+  if (USE_S3_STORAGE) {
+    return res.status(404).json({ message: "HLS preview is not available for S3 storage yet" });
+  }
   const relativePath = parseRelativePath(req.query.path || "");
   const status = await readHlsStatus(relativePath);
 
@@ -906,6 +1015,9 @@ router.get("/preview/hls", async (req, res) => {
 
 router.get("/preview/hls/segment", async (req, res) => {
   await ensureRootReady();
+  if (USE_S3_STORAGE) {
+    return res.status(404).json({ message: "HLS preview is not available for S3 storage yet" });
+  }
   const relativePath = parseRelativePath(req.query.path || "");
   const fileName = ensureSafeName(req.query.file || "");
   const segmentPath = await getHlsSegmentPath(relativePath, fileName);
@@ -920,12 +1032,16 @@ router.get("/preview/hls/segment", async (req, res) => {
 
 router.delete("/delete", async (req, res) => {
   await ensureRootReady();
-  const STORAGE_ROOT = getActiveStorageRoot();
   const body = parseJsonBody(req);
   const targetPath = parseRelativePath(body.path || req.query.path || "");
   if (!targetPath || targetPath === "/") {
     return res.status(400).json({ message: "Deleting the storage root is not allowed" });
   }
+  if (USE_S3_STORAGE) {
+    await s3DeleteEntry(targetPath);
+    return res.json({ message: "Item deleted" });
+  }
+  const STORAGE_ROOT = getActiveStorageRoot();
   await removeEntry(STORAGE_ROOT, targetPath);
   return res.json({ message: "Item deleted" });
 });
@@ -950,6 +1066,15 @@ router.get("/transfer/jobs", async (req, res) => {
 });
 
 router.get("/storage-folders", async (req, res) => {
+  if (USE_S3_STORAGE) {
+    const currentPath = parseRelativePath(req.query.path || "");
+    const payload = await s3ListDirectory(currentPath);
+    return res.json({
+      rootId: "s3",
+      currentPath: payload.currentPath.replace(/^\/+/, ""),
+      folders: payload.items.filter((item) => item.type === "folder").map((item) => ({ name: item.name, path: item.path })),
+    });
+  }
   const rootId = String(req.query.rootId || "");
   const storageRoot = await getStorageRootById(rootId);
   const currentPath = parseRelativePath(req.query.path || "");
@@ -965,6 +1090,15 @@ router.get("/storage-folders", async (req, res) => {
 router.get("/global-search", async (req, res) => {
   const query = String(req.query.q || "").trim().toLowerCase();
   if (query.length < 2) return res.json({ items: [] });
+  if (USE_S3_STORAGE) {
+    const payload = await s3ListAllItems();
+    return res.json({
+      items: payload.items
+        .filter((item) => item.name.toLowerCase().includes(query))
+        .slice(0, 200)
+        .map((item) => ({ ...item, rootId: "s3", rootLabel: "S3" })),
+    });
+  }
   const results = [];
   const rootState = await getStorageRootState();
 
@@ -1002,6 +1136,15 @@ router.get("/global-search", async (req, res) => {
 
 router.get("/items", async (req, res) => {
   await ensureRootReady();
+  if (USE_S3_STORAGE) {
+    const currentPath = parseRelativePath(req.query.path || "");
+    const item = await s3GetFileInfo(currentPath).catch((error) => {
+      if (error?.$metadata?.httpStatusCode === 404 || error?.name === "NotFound") return null;
+      throw error;
+    });
+    if (!item) return res.status(404).json({ message: "Item not found" });
+    return res.json(item);
+  }
   const STORAGE_ROOT = getActiveStorageRoot();
   const currentPath = parseRelativePath(req.query.path || "");
   const { absolutePath } = resolveStoragePath(STORAGE_ROOT, currentPath);

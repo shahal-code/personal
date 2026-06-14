@@ -36,6 +36,10 @@ export const COOKIE_SECURE = process.env.COOKIE_SECURE === "true";
 export const COOKIE_SAME_SITE = process.env.COOKIE_SAME_SITE || "Strict";
 export const STORAGE_TOTAL_BYTES = Number(process.env.TOTAL_STORAGE_BYTES || 0);
 export const REQUIRE_PASSWORD_HASH = process.env.REQUIRE_PASSWORD_HASH === "true" || process.env.NODE_ENV === "production";
+export const STORAGE_DRIVER = (process.env.STORAGE_DRIVER || "local").toLowerCase();
+export const AWS_REGION = process.env.AWS_REGION || "";
+export const S3_BUCKET = process.env.S3_BUCKET || "";
+export const S3_PREFIX = (process.env.S3_PREFIX || "").replace(/^\/+|\/+$/g, "");
 
 export function assertRequiredEnv() {
   const missing = [];
@@ -45,6 +49,10 @@ export function assertRequiredEnv() {
     missing.push("ADMIN_PASSWORD or ADMIN_PASSWORD_HASH");
   }
   if (!JWT_SECRET) missing.push("JWT_SECRET");
+  if (STORAGE_DRIVER === "s3") {
+    if (!AWS_REGION) missing.push("AWS_REGION");
+    if (!S3_BUCKET) missing.push("S3_BUCKET");
+  }
 
   if (missing.length > 0) {
     throw new Error(`Missing required environment variables: ${missing.join(", ")}`);
@@ -60,5 +68,9 @@ export function assertRequiredEnv() {
 
   if (COOKIE_SAME_SITE === "None" && !COOKIE_SECURE && process.env.NODE_ENV === "production") {
     throw new Error("COOKIE_SECURE=true is required when COOKIE_SAME_SITE=None in production");
+  }
+
+  if (!["local", "s3"].includes(STORAGE_DRIVER)) {
+    throw new Error("STORAGE_DRIVER must be either local or s3");
   }
 }
