@@ -231,6 +231,26 @@ export async function s3CreateMultipartUpload(relativePath, contentType) {
   };
 }
 
+function contentTypeForPath(relativePath) {
+  const extension = path.posix.extname(normalizeRelativePath(relativePath)).slice(1).toLowerCase();
+  return {
+    mp4: "video/mp4",
+    m4v: "video/mp4",
+    mov: "video/quicktime",
+    webm: "video/webm",
+    mp3: "audio/mpeg",
+    m4a: "audio/mp4",
+    wav: "audio/wav",
+    ogg: "audio/ogg",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    gif: "image/gif",
+    webp: "image/webp",
+    pdf: "application/pdf",
+  }[extension];
+}
+
 export async function s3CreateMultipartPartUrl(relativePath, uploadId, partNumber) {
   const command = new UploadPartCommand({
     Bucket: S3_BUCKET,
@@ -275,6 +295,7 @@ export async function s3CreateReadUrl(relativePath, download = false) {
     Bucket: S3_BUCKET,
     Key: keyFor(relativePath),
     ResponseContentDisposition: download ? `attachment; filename="${fileName.replaceAll('"', "")}"` : undefined,
+    ResponseContentType: download ? undefined : contentTypeForPath(relativePath),
   });
   return getSignedUrl(s3, command, { expiresIn: 60 * 10 });
 }

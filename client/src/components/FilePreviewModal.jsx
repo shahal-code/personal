@@ -363,7 +363,6 @@ export default function FilePreviewModal({ item, onClose, onPrevious, onNext, ha
                 autoPlay
                 playsInline
                 muted={false}
-                crossOrigin="use-credentials"
                 preload="metadata"
                 onError={handleVideoError}
                 onStalled={handleVideoStalled}
@@ -380,11 +379,11 @@ export default function FilePreviewModal({ item, onClose, onPrevious, onNext, ha
               </button>
             </>
           ) : kind === "audio" ? (
-            <audio className="preview-media preview-media--audio" controls autoPlay src={previewUrl} crossOrigin="use-credentials" />
+            <audio className="preview-media preview-media--audio" controls autoPlay src={previewUrl} />
           ) : kind === "image" ? (
             <>
               <button className="preview-nav preview-nav--previous" type="button" onClick={onPrevious} disabled={!hasPrevious} aria-label="Previous media">&#8249;</button>
-              <img className="preview-image" src={previewUrl} alt={item.name} crossOrigin="use-credentials" />
+              <img className="preview-image" src={previewUrl} alt={item.name} />
               <button className="preview-nav preview-nav--next" type="button" onClick={onNext} disabled={!hasNext} aria-label="Next media">&#8250;</button>
             </>
           ) : kind === "pdf" ? (
