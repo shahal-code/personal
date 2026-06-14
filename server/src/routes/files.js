@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import express, { Router } from "express";
 import multer from "multer";
 import { pipeline } from "node:stream/promises";
-import { STORAGE_ROOT, TEMP_DIR } from "../config/env.js";
+import { TEMP_DIR } from "../config/env.js";
 import { requireAdmin } from "../middleware/auth.js";
 import { noStore } from "../middleware/security.js";
 import {
@@ -22,6 +22,7 @@ import {
 import { joinRelativePath, resolveStoragePath, ensureSafeName } from "../lib/path.js";
 import { getHlsPlaylist, readHlsStatus, rewriteHlsPlaylist, shouldGenerateHls, startHlsTranscode, getHlsSegmentPath } from "../lib/hls.js";
 import { parseJsonBody, parseRelativePath } from "../utils/validation.js";
+import { getActiveStorageRoot } from "../lib/storage-roots.js";
 
 const router = Router();
 const upload = multer({ dest: TEMP_DIR, limits: { fileSize: 1024 * 1024 * 1024 * 10 } });
@@ -246,7 +247,7 @@ async function getChunkSessionState(sessionPath) {
 }
 
 async function ensureRootReady() {
-  await ensureDirectory(STORAGE_ROOT);
+  await ensureDirectory(getActiveStorageRoot());
   await ensureDirectory(TEMP_DIR);
   await ensureDirectory(streamUploadRoot);
   await ensureDirectory(resumableUploadRoot);
@@ -283,6 +284,7 @@ router.use(
 
 router.get("/files", async (req, res) => {
   await ensureRootReady();
+  const STORAGE_ROOT = getActiveStorageRoot();
   const currentPath = parseRelativePath(req.query.path || "");
   const payload = await listDirectory(STORAGE_ROOT, currentPath);
   return res.json(payload);
@@ -290,12 +292,14 @@ router.get("/files", async (req, res) => {
 
 router.get("/gallery", async (req, res) => {
   await ensureRootReady();
+  const STORAGE_ROOT = getActiveStorageRoot();
   const payload = await listAllItems(STORAGE_ROOT);
   return res.json(payload);
 });
 
 router.post("/folders", async (req, res) => {
   await ensureRootReady();
+  const STORAGE_ROOT = getActiveStorageRoot();
   const body = parseJsonBody(req);
   const parentPath = parseRelativePath(body.path || "");
   const folderName = body.name;
@@ -309,6 +313,7 @@ router.post("/folders", async (req, res) => {
 
 router.patch("/files", async (req, res) => {
   await ensureRootReady();
+  const STORAGE_ROOT = getActiveStorageRoot();
   const body = parseJsonBody(req);
   const targetPath = parseRelativePath(body.path || "");
   const newName = body.newName;
@@ -322,6 +327,7 @@ router.patch("/files", async (req, res) => {
 
 router.post("/upload", upload.array("files"), async (req, res) => {
   await ensureRootReady();
+  const STORAGE_ROOT = getActiveStorageRoot();
   const targetPath = parseRelativePath(req.body?.path || "");
   const { absolutePath: targetDirectory } = resolveStoragePath(STORAGE_ROOT, targetPath);
   await fs.mkdir(targetDirectory, { recursive: true });
@@ -361,6 +367,7 @@ router.post("/upload", upload.array("files"), async (req, res) => {
 
 router.post("/upload/session", async (req, res) => {
   await ensureRootReady();
+  const STORAGE_ROOT = getActiveStorageRoot();
   const body = parseJsonBody(req);
   const targetPath = parseRelativePath(body.path || "");
   const fileName = ensureSafeName(body.name || "");
@@ -415,6 +422,7 @@ router.post("/upload/session", async (req, res) => {
 
 router.get("/upload/session/:uploadId", async (req, res) => {
   await ensureRootReady();
+  const STORAGE_ROOT = getActiveStorageRoot();
   const uploadId = ensureSafeUploadId(req.params.uploadId || "");
   const meta = await readResumableMeta(uploadId);
 
@@ -492,6 +500,7 @@ router.patch("/upload/session/:uploadId", async (req, res) => {
 
 router.post("/upload/session/:uploadId/complete", async (req, res) => {
   await ensureRootReady();
+  const STORAGE_ROOT = getActiveStorageRoot();
   const uploadId = ensureSafeUploadId(req.params.uploadId || "");
   const meta = await readResumableMeta(uploadId);
 
@@ -531,6 +540,7 @@ router.post("/upload/session/:uploadId/complete", async (req, res) => {
 
 router.post("/upload/chunk", chunkUpload, async (req, res) => {
   await ensureRootReady();
+  const STORAGE_ROOT = getActiveStorageRoot();
 
   const targetPath = parseRelativePath(req.query.path || "");
   const fileName = ensureSafeName(req.query.name || "");
@@ -633,6 +643,7 @@ router.post("/upload/chunk", chunkUpload, async (req, res) => {
 
 router.post("/upload/stream", async (req, res) => {
   await ensureRootReady();
+  const STORAGE_ROOT = getActiveStorageRoot();
 
   const targetPath = parseRelativePath(req.query.path || "");
   const fileName = ensureSafeName(req.query.name || "");
@@ -741,6 +752,7 @@ router.get("/upload/chunk/status", async (req, res) => {
 
 router.get("/video/transcode/status", async (req, res) => {
   await ensureRootReady();
+  const STORAGE_ROOT = getActiveStorageRoot();
   const relativePath = parseRelativePath(req.query.path || "");
   let status = await readHlsStatus(relativePath);
 
@@ -762,6 +774,7 @@ router.get("/video/transcode/status", async (req, res) => {
 
 router.get("/download", async (req, res) => {
   await ensureRootReady();
+  const STORAGE_ROOT = getActiveStorageRoot();
   const relativePath = parseRelativePath(req.query.path || "");
   const { absolutePath } = resolveStoragePath(STORAGE_ROOT, relativePath);
   const stats = await fs.stat(absolutePath);
@@ -777,6 +790,7 @@ router.get("/download", async (req, res) => {
 
 router.get("/preview", async (req, res) => {
   await ensureRootReady();
+  const STORAGE_ROOT = getActiveStorageRoot();
   const relativePath = parseRelativePath(req.query.path || "");
   const { absolutePath } = resolveStoragePath(STORAGE_ROOT, relativePath);
   const stats = await fs.stat(absolutePath);
@@ -796,6 +810,7 @@ router.get("/preview", async (req, res) => {
 
 router.get("/preview/live", async (req, res) => {
   await ensureRootReady();
+  const STORAGE_ROOT = getActiveStorageRoot();
   const relativePath = parseRelativePath(req.query.path || "");
   const { absolutePath: finalPath } = resolveStoragePath(STORAGE_ROOT, relativePath);
 
@@ -875,6 +890,7 @@ router.get("/preview/hls/segment", async (req, res) => {
 
 router.delete("/delete", async (req, res) => {
   await ensureRootReady();
+  const STORAGE_ROOT = getActiveStorageRoot();
   const body = parseJsonBody(req);
   const targetPath = parseRelativePath(body.path || req.query.path || "");
   if (!targetPath || targetPath === "/") {
@@ -886,6 +902,7 @@ router.delete("/delete", async (req, res) => {
 
 router.get("/items", async (req, res) => {
   await ensureRootReady();
+  const STORAGE_ROOT = getActiveStorageRoot();
   const currentPath = parseRelativePath(req.query.path || "");
   const { absolutePath } = resolveStoragePath(STORAGE_ROOT, currentPath);
   const stats = await readEntryStats(absolutePath).catch((error) => {

@@ -14,6 +14,9 @@ export const TEMP_DIR = path.join(DATA_DIR, "tmp");
 export const STORAGE_ROOT = path.resolve(
   process.env.STORAGE_ROOT || path.join(SERVER_ROOT, "storage")
 );
+export const SD_STORAGE_ROOT = process.env.SD_STORAGE_ROOT
+  ? path.resolve(process.env.SD_STORAGE_ROOT)
+  : "";
 
 export const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "";
 export const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";

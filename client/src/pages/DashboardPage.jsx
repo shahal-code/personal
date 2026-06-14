@@ -257,6 +257,7 @@ export default function DashboardPage() {
   const [folderModalOpen, setFolderModalOpen] = useState(false);
   const [folderName, setFolderName] = useState("");
   const [previewTarget, setPreviewTarget] = useState(null);
+  const [changingStorageRoot, setChangingStorageRoot] = useState(false);
 
   const crumbs = useMemo(() => breadcrumbSegments(directory.currentPath), [directory.currentPath]);
   const visibleDirectoryItems = useMemo(
@@ -271,6 +272,10 @@ export default function DashboardPage() {
       ),
     [gallery.items, galleryFilter, galleryQuery, gallerySort]
   );
+  const galleryVideos = useMemo(() => galleryItems.filter(isVideoItem), [galleryItems]);
+  const previewVideoIndex = previewTarget && isVideoItem(previewTarget)
+    ? galleryVideos.findIndex((item) => item.path === previewTarget.path)
+    : -1;
   const uploadElapsedSeconds = uploadStartedAt ? (Date.now() - uploadStartedAt) / 1000 : 0;
   const uploadSpeed = uploadElapsedSeconds > 0 ? uploadLoadedBytes / uploadElapsedSeconds : 0;
   const uploadEta = uploadSpeed > 0 ? (uploadTotalBytes - uploadLoadedBytes) / uploadSpeed : 0;
@@ -314,6 +319,23 @@ export default function DashboardPage() {
       setSystemStatus(status);
     } catch {
       setSystemStatus(null);
+    }
+  }
+
+  async function handleStorageRootChange(rootId) {
+    setChangingStorageRoot(true);
+    setError("");
+    setPreviewTarget(null);
+
+    try {
+      await request("/storage/root", { method: "PUT", body: { rootId } });
+      navigate("/app", { replace: true });
+      await loadData("");
+      setMessage("Storage location changed");
+    } catch (requestError) {
+      setError(requestError.message || "Unable to change storage location");
+    } finally {
+      setChangingStorageRoot(false);
     }
   }
 
@@ -799,6 +821,8 @@ export default function DashboardPage() {
           <StoragePanel
             storage={storage}
             systemStatus={systemStatus}
+            onStorageRootChange={handleStorageRootChange}
+            changingStorageRoot={changingStorageRoot}
             transferStatus={{
               activeUploads: uploading ? uploadFileCount : 0,
               uploadBytesPerSecond: uploading ? uploadSpeed : 0,
@@ -1098,7 +1122,16 @@ export default function DashboardPage() {
         />
       ) : null}
 
-      {previewTarget ? <FilePreviewModal item={previewTarget} onClose={() => setPreviewTarget(null)} /> : null}
+      {previewTarget ? (
+        <FilePreviewModal
+          item={previewTarget}
+          onClose={() => setPreviewTarget(null)}
+          hasPrevious={previewVideoIndex > 0}
+          hasNext={previewVideoIndex >= 0 && previewVideoIndex < galleryVideos.length - 1}
+          onPrevious={() => setPreviewTarget(galleryVideos[previewVideoIndex - 1])}
+          onNext={() => setPreviewTarget(galleryVideos[previewVideoIndex + 1])}
+        />
+      ) : null}
     </div>
   );
 }

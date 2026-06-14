@@ -30,7 +30,7 @@ function getPreviewKind(item) {
   return "generic";
 }
 
-export default function FilePreviewModal({ item, onClose }) {
+export default function FilePreviewModal({ item, onClose, onPrevious, onNext, hasPrevious, hasNext }) {
   const kind = useMemo(() => getPreviewKind(item), [item]);
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
@@ -260,6 +260,16 @@ export default function FilePreviewModal({ item, onClose }) {
     []
   );
 
+  useEffect(() => {
+    function handleKeyDown(event) {
+      if (event.key === "ArrowLeft" && hasPrevious) onPrevious?.();
+      if (event.key === "ArrowRight" && hasNext) onNext?.();
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [hasNext, hasPrevious, onNext, onPrevious]);
+
   async function handleDownload() {
     setDownloading(true);
 
@@ -325,19 +335,39 @@ export default function FilePreviewModal({ item, onClose }) {
           ) : error ? (
             <div className="error-banner">{error}</div>
           ) : kind === "video" ? (
-            <video
-              ref={videoRef}
-              className="preview-media"
-              controls
-              autoPlay
-              playsInline
-              muted={false}
-              crossOrigin="use-credentials"
-              preload="metadata"
-              onError={handleVideoError}
-              onStalled={handleVideoStalled}
-              onClick={(event) => event.stopPropagation()}
-            />
+            <>
+              <button
+                className="preview-nav preview-nav--previous"
+                type="button"
+                onClick={onPrevious}
+                disabled={!hasPrevious}
+                aria-label="Previous video"
+              >
+                &#8249;
+              </button>
+              <video
+                ref={videoRef}
+                className="preview-media"
+                controls
+                autoPlay
+                playsInline
+                muted={false}
+                crossOrigin="use-credentials"
+                preload="metadata"
+                onError={handleVideoError}
+                onStalled={handleVideoStalled}
+                onClick={(event) => event.stopPropagation()}
+              />
+              <button
+                className="preview-nav preview-nav--next"
+                type="button"
+                onClick={onNext}
+                disabled={!hasNext}
+                aria-label="Next video"
+              >
+                &#8250;
+              </button>
+            </>
           ) : kind === "audio" ? (
             <audio className="preview-media preview-media--audio" controls autoPlay src={previewUrl} crossOrigin="use-credentials" />
           ) : kind === "image" ? (

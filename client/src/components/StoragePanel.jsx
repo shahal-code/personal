@@ -1,6 +1,6 @@
 import { formatBytes, formatDate, formatPercent, formatTemperature } from "../api/http.js";
 
-export default function StoragePanel({ storage, systemStatus, transferStatus }) {
+export default function StoragePanel({ storage, systemStatus, transferStatus, onStorageRootChange, changingStorageRoot }) {
   const total = Number(storage?.totalBytes || 0);
   const used = Number(storage?.usedBytes || 0);
   const free = Number(storage?.freeBytes || 0);
@@ -43,7 +43,23 @@ export default function StoragePanel({ storage, systemStatus, transferStatus }) 
           <p className="eyebrow">Storage</p>
           <h2>Capacity at a glance</h2>
         </div>
-        <span className="status-pill">{usedPercent}% used</span>
+        <div className="storage-root-controls">
+          <label htmlFor="storage-root">Storage location</label>
+          <select
+            id="storage-root"
+            className="text-input control-select"
+            value={storage?.roots?.activeRootId || "internal"}
+            onChange={(event) => onStorageRootChange?.(event.target.value)}
+            disabled={changingStorageRoot}
+          >
+            {(storage?.roots?.options || []).map((option) => (
+              <option key={option.id} value={option.id} disabled={!option.available}>
+                {option.label}{option.available ? "" : option.configured ? " (not mounted)" : " (not configured)"}
+              </option>
+            ))}
+          </select>
+          <span className="status-pill">{usedPercent}% used</span>
+        </div>
       </div>
       <div className="warning-list">
         {lowStorage ? (

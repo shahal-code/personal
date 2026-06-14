@@ -15,11 +15,13 @@ import { requireAdminPage } from "./middleware/auth.js";
 import { noStore, rateLimit, requireTrustedOrigin, securityRequestId } from "./middleware/security.js";
 import { ensureDirectory } from "./lib/files.js";
 import { pruneExpiredTokens } from "./lib/sessions.js";
+import { initializeStorageRoots } from "./lib/storage-roots.js";
 
 export async function createApp() {
   assertRequiredEnv();
   await ensureDirectory(DATA_DIR);
   await ensureDirectory(STORAGE_ROOT);
+  await initializeStorageRoots();
   await pruneExpiredTokens();
 
   const app = express();
