@@ -14,6 +14,10 @@ const S3_MULTIPART_CONCURRENCY = Math.max(
   1,
   Math.min(12, Number(import.meta.env.VITE_S3_MULTIPART_CONCURRENCY || 8))
 );
+const S3_MULTIPART_PART_RETRIES = Math.max(
+  3,
+  Math.min(10, Number(import.meta.env.VITE_S3_MULTIPART_PART_RETRIES || 6))
+);
 const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024;
 const STREAM_LARGE_UPLOADS_SETTING = import.meta.env.VITE_STREAM_LARGE_UPLOADS || "auto";
 const UPLOAD_SESSION_STORAGE_KEY = "phonecloud.resumableUploads";
@@ -542,7 +546,7 @@ async function sendS3Multipart(basePath, file, options = {}) {
       let etag = "";
       let attempts = 0;
 
-      while (!etag && attempts < 3) {
+      while (!etag && attempts < S3_MULTIPART_PART_RETRIES) {
         attempts += 1;
         try {
           part.loaded = 0;
@@ -565,10 +569,10 @@ async function sendS3Multipart(basePath, file, options = {}) {
             },
           });
         } catch (error) {
-          if (!isRetryableUploadError(error) || attempts >= 3) {
+          if (!isRetryableUploadError(error) || attempts >= S3_MULTIPART_PART_RETRIES) {
             throw error;
           }
-          await delay(600 * attempts);
+          await delay(Math.min(8000, 700 * attempts ** 1.4) + Math.round(Math.random() * 400));
         }
       }
 
@@ -587,6 +591,15 @@ async function sendS3Multipart(basePath, file, options = {}) {
       signal,
     }).catch(() => {});
     throw error;
+  }
+
+  if (completedParts.length !== parts.length) {
+    await request(`${basePath}/s3/multipart/abort`, {
+      method: "POST",
+      body: { path: session.path, uploadId: session.uploadId },
+      signal,
+    }).catch(() => {});
+    throw normalizeError("Upload failed before all S3 parts were saved", 0);
   }
 
   return request(`${basePath}/s3/multipart/complete`, {

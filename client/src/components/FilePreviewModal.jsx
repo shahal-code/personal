@@ -43,7 +43,11 @@ export default function FilePreviewModal({ item, onClose, onPrevious, onNext, ha
   const [hlsModule, setHlsModule] = useState(null);
   const [downloading, setDownloading] = useState(false);
   const [videoError, setVideoError] = useState(false);
-  const previewUrl = localPreviewUrl || resolveUrl(`/preview?path=${encodeURIComponent(item.path)}`);
+  const fallbackPreviewUrl = resolveUrl(`/preview?path=${encodeURIComponent(item.path)}`);
+  const [signedPreviewUrl, setSignedPreviewUrl] = useState("");
+  const [previewUrlLoading, setPreviewUrlLoading] = useState(false);
+  const shouldUseSignedPreview = !localPreviewUrl && ["video", "audio", "image"].includes(kind);
+  const previewUrl = localPreviewUrl || signedPreviewUrl || (shouldUseSignedPreview && previewUrlLoading ? "" : fallbackPreviewUrl);
   const directVideoUrl = previewUrl;
   const isLocalPreview = Boolean(localPreviewUrl);
   const hlsUrl = resolveUrl(`/preview/hls?path=${encodeURIComponent(item.path)}`);
@@ -57,7 +61,34 @@ export default function FilePreviewModal({ item, onClose, onPrevious, onNext, ha
   useEffect(() => {
     setVideoError(false);
     setTranscodeStatus(null);
+    setSignedPreviewUrl("");
+    setPreviewUrlLoading(false);
   }, [item?.path]);
+
+  useEffect(() => {
+    if (localPreviewUrl || !["video", "audio", "image"].includes(kind)) {
+      return undefined;
+    }
+
+    let active = true;
+    setPreviewUrlLoading(true);
+    request(`/preview-url?path=${encodeURIComponent(item.path)}`)
+      .then((payload) => {
+        if (active && payload?.url) {
+          setSignedPreviewUrl(payload.url);
+        }
+      })
+      .catch(() => {
+        if (active) setSignedPreviewUrl("");
+      })
+      .finally(() => {
+        if (active) setPreviewUrlLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [item.path, kind, localPreviewUrl]);
 
   useEffect(() => {
     let active = true;
@@ -157,6 +188,9 @@ export default function FilePreviewModal({ item, onClose, onPrevious, onNext, ha
 
     const videoElement = videoRef.current;
     if (!videoElement) {
+      return undefined;
+    }
+    if (!directVideoUrl) {
       return undefined;
     }
 
@@ -370,7 +404,7 @@ export default function FilePreviewModal({ item, onClose, onPrevious, onNext, ha
                 autoPlay
                 playsInline
                 muted={false}
-                preload={isLocalPreview ? "auto" : "metadata"}
+                preload="auto"
                 onError={handleVideoError}
                 onStalled={handleVideoStalled}
                 onClick={(event) => event.stopPropagation()}

@@ -269,7 +269,7 @@ export async function s3CreateMultipartPartUrl(relativePath, uploadId, partNumbe
     UploadId: uploadId,
     PartNumber: partNumber,
   });
-  return getSignedUrl(s3, command, { expiresIn: 60 * 15 });
+  return getSignedUrl(s3, command, { expiresIn: 60 * 60 });
 }
 
 export async function s3CompleteMultipartUpload(relativePath, uploadId, parts) {

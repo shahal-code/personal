@@ -1159,6 +1159,17 @@ router.delete("/delete", async (req, res) => {
   return res.json({ message: "Item deleted" });
 });
 
+router.get("/preview-url", async (req, res) => {
+  await ensureRootReady();
+  if (!USE_S3_STORAGE) {
+    const relativePath = parseRelativePath(req.query.path || "");
+    return res.json({ url: `/preview?path=${encodeURIComponent(relativePath)}` });
+  }
+
+  const relativePath = parseRelativePath(req.query.path || "");
+  return res.json({ url: await s3CreateReadUrl(relativePath, false) });
+});
+
 router.post("/transfer", async (req, res) => {
   const body = parseJsonBody(req);
   const sourceRelative = parseRelativePath(body.path || "");
