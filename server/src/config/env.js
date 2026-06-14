@@ -24,6 +24,8 @@ export const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH || "";
 export const JWT_SECRET = process.env.JWT_SECRET || "";
 
 export const PORT = Number(process.env.PORT || 3000);
+export const LOCAL_APP_URL = process.env.LOCAL_APP_URL || "";
+export const PUBLIC_APP_URL = process.env.PUBLIC_APP_URL || "";
 export const CLIENT_ORIGINS = (process.env.CLIENT_ORIGINS ||
   "http://localhost:5173,http://127.0.0.1:5173")
   .split(",")

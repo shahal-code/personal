@@ -361,6 +361,37 @@ h2 {
   contain: layout paint;
 }
 
+.access-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  background: rgba(7, 13, 22, 0.58);
+}
+
+.access-mode > span {
+  padding: 0 6px;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.access-mode__button {
+  min-height: 38px;
+  padding: 7px 11px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  color: var(--muted);
+  background: transparent;
+}
+
+.access-mode__button--active {
+  color: #dff4ff;
+  border-color: rgba(56, 189, 248, 0.4);
+  background: rgba(56, 189, 248, 0.14);
+}
+
 .standalone-page {
   min-height: 100svh;
   display: grid;
@@ -1611,6 +1642,15 @@ h2 {
   .modal-actions {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .access-mode {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .access-mode > span {
+    grid-column: 1 / -1;
   }
 
   .storage-root-controls {

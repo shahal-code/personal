@@ -7,7 +7,6 @@ import {
   ADMIN_PASSWORD,
   ADMIN_PASSWORD_HASH,
   COOKIE_NAME,
-  COOKIE_SECURE,
   COOKIE_SAME_SITE,
   JWT_SECRET,
   TOKEN_TTL,
@@ -37,29 +36,37 @@ function getAttemptBucket(ip) {
   return bucket;
 }
 
-function setAuthCookie(res, token, expiresAt) {
-  const secureFlag = COOKIE_SECURE || process.env.NODE_ENV === "production";
+function getCookiePolicy(req) {
+  const secure = req.secure || req.headers["x-forwarded-proto"] === "https";
+  return {
+    secure,
+    sameSite: secure ? COOKIE_SAME_SITE : "Lax",
+  };
+}
+
+function setAuthCookie(req, res, token, expiresAt) {
+  const policy = getCookiePolicy(req);
   const cookieParts = [
     `${COOKIE_NAME}=${encodeURIComponent(token)}`,
     "HttpOnly",
     "Path=/",
-    `SameSite=${COOKIE_SAME_SITE}`,
-    secureFlag ? "Secure" : null,
+    `SameSite=${policy.sameSite}`,
+    policy.secure ? "Secure" : null,
     expiresAt ? `Expires=${new Date(expiresAt * 1000).toUTCString()}` : null,
   ].filter(Boolean);
 
   res.setHeader("Set-Cookie", cookieParts.join("; "));
 }
 
-function clearAuthCookie(res) {
-  const secureFlag = COOKIE_SECURE || process.env.NODE_ENV === "production";
+function clearAuthCookie(req, res) {
+  const policy = getCookiePolicy(req);
   const cookieParts = [
     `${COOKIE_NAME}=`,
     "HttpOnly",
     "Path=/",
-    `SameSite=${COOKIE_SAME_SITE}`,
+    `SameSite=${policy.sameSite}`,
     "Max-Age=0",
-    secureFlag ? "Secure" : null,
+    policy.secure ? "Secure" : null,
   ].filter(Boolean);
 
   res.setHeader("Set-Cookie", cookieParts.join("; "));
@@ -122,7 +129,7 @@ router.post("/login", rateLimit({ windowMs: WINDOW_MS, max: 20, message: "Too ma
   const decoded = jwt.decode(token);
   const expiresAt = typeof decoded?.exp === "number" ? decoded.exp : now + 12 * 60 * 60;
 
-  setAuthCookie(res, token, expiresAt);
+  setAuthCookie(req, res, token, expiresAt);
   loginAttempts.delete(req.ip || "unknown");
   await recordAuditEvent(req, {
     type: "login_success",
@@ -162,7 +169,7 @@ router.post("/logout", async (req, res) => {
     }
   }
 
-  clearAuthCookie(res);
+  clearAuthCookie(req, res);
   await recordAuditEvent(req, { type: "logout", outcome: "success", sessionId, email, detail: "Administrator signed out" });
   return res.json({ authenticated: false });
 });

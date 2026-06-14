@@ -1,5 +1,6 @@
 import path from "node:path";
 import fs from "node:fs/promises";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import cors from "cors";
@@ -9,7 +10,7 @@ import fileRoutes from "./routes/files.js";
 import systemRoutes from "./routes/system.js";
 import storageRoutes from "./routes/storage.js";
 import securityActivityRoutes from "./routes/security-activity.js";
-import { CLIENT_ORIGINS, DATA_DIR, STORAGE_ROOT } from "./config/env.js";
+import { CLIENT_ORIGINS, DATA_DIR, LOCAL_APP_URL, PORT, PUBLIC_APP_URL, STORAGE_ROOT } from "./config/env.js";
 import { assertRequiredEnv } from "./config/env.js";
 import { notFoundHandler, errorHandler } from "./middleware/error.js";
 import { requireAdminPage } from "./middleware/auth.js";
@@ -82,6 +83,18 @@ export async function createApp() {
     });
   });
 
+  app.get("/access-config", noStore, (req, res) => {
+    const localAddress = Object.values(os.networkInterfaces())
+      .flat()
+      .find((entry) => entry?.family === "IPv4" && !entry.internal && /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(entry.address));
+    const publicUrl = PUBLIC_APP_URL || CLIENT_ORIGINS.find((origin) => origin.startsWith("https://")) || "";
+    return res.json({
+      localUrl: LOCAL_APP_URL || (localAddress ? `http://${localAddress.address}:${PORT}` : ""),
+      publicUrl,
+      currentUrl: `${req.protocol}://${req.get("host")}`,
+    });
+  });
+
   app.use(authRoutes);
   app.use(fileRoutes);
   app.use(systemRoutes);
@@ -99,7 +112,7 @@ export async function createApp() {
     app.use(express.static(clientDist, { index: false, maxAge: "1h" }));
     app.get(/.*/, async (req, res) => {
       if (
-        ["/preview", "/video", "/download", "/files", "/gallery", "/folders", "/upload", "/delete", "/items", "/transfer", "/storage-folders", "/global-search", "/storage", "/security-activity", "/system-status", "/cpu-status"].some(
+        ["/preview", "/video", "/download", "/files", "/gallery", "/folders", "/upload", "/delete", "/items", "/transfer", "/storage-folders", "/global-search", "/storage", "/security-activity", "/system-status", "/cpu-status", "/access-config"].some(
           (prefix) => req.path === prefix || req.path.startsWith(`${prefix}/`)
         )
       ) {

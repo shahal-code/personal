@@ -9,6 +9,7 @@ import ConfirmModal from "../components/ConfirmModal.jsx";
 import ToastStack from "../components/ToastStack.jsx";
 import { FileActionModal, FileDetailsModal, TransferModal } from "../components/FileActionModal.jsx";
 import TransferJobsPanel from "../components/TransferJobsPanel.jsx";
+import AccessModeButtons from "../components/AccessModeButtons.jsx";
 
 const UPLOAD_SESSION_KEY = "phonecloud.uploadSession";
 const UPLOAD_MODE_KEY = "phonecloud.uploadMode";
@@ -916,6 +917,7 @@ export default function DashboardPage() {
             <h2>Storage dashboard</h2>
           </div>
           <div className="toolbar">
+            <AccessModeButtons />
             <button className="secondary-button" type="button" onClick={() => navigate("/app/search")}>
               Global Search
             </button>
