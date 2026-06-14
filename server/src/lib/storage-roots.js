@@ -112,6 +112,21 @@ export function getActiveStorageRoot() {
   return roots[activeRootId].resolvedPath || roots[activeRootId].path;
 }
 
+export async function getStorageRootById(rootId) {
+  const root = roots[rootId];
+  if (!root) {
+    throw Object.assign(new Error("Unknown storage root"), { statusCode: 400 });
+  }
+
+  const inspection = await inspectRoot(rootId, root.path);
+  if (!inspection.available) {
+    throw Object.assign(new Error(`${root.label} is not accessible`), { statusCode: 409 });
+  }
+
+  root.resolvedPath = inspection.resolvedPath;
+  return root.resolvedPath;
+}
+
 export async function getStorageRootState() {
   const options = await Promise.all(
     Object.values(roots).map(async ({ id, label, path: rootPath }) => {

@@ -6,10 +6,21 @@ import StoragePanel from "../components/StoragePanel.jsx";
 import Modal from "../components/Modal.jsx";
 import FilePreviewModal from "../components/FilePreviewModal.jsx";
 import ConfirmModal from "../components/ConfirmModal.jsx";
+import ToastStack from "../components/ToastStack.jsx";
+import { FileActionModal, FileDetailsModal, TransferModal } from "../components/FileActionModal.jsx";
 
 const UPLOAD_SESSION_KEY = "phonecloud.uploadSession";
 const UPLOAD_MODE_KEY = "phonecloud.uploadMode";
 const UPLOAD_HISTORY_KEY = "phonecloud.uploadHistory";
+const FAVORITES_KEY = "phonecloud.favorites";
+
+function readFavorites() {
+  try {
+    return JSON.parse(window.localStorage.getItem(FAVORITES_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
 
 function readUploadSession() {
   try {
@@ -162,7 +173,7 @@ function breadcrumbSegments(currentPath) {
   return crumbs;
 }
 
-function RowActions({ item, onOpen, onRename, onDelete }) {
+function RowActions({ item, onOpen, onMore, onRename, onDelete }) {
   return (
     <div className="row-actions">
       {item.type === "folder" ? (
@@ -176,6 +187,9 @@ function RowActions({ item, onOpen, onRename, onDelete }) {
       )}
       <button className="ghost-button" type="button" onClick={onRename}>
         Rename
+      </button>
+      <button className="ghost-button" type="button" onClick={onMore}>
+        More
       </button>
       <button className="ghost-button ghost-button--danger" type="button" onClick={onDelete}>
         Delete
@@ -260,12 +274,25 @@ export default function DashboardPage() {
   const [previewTarget, setPreviewTarget] = useState(null);
   const [changingStorageRoot, setChangingStorageRoot] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [favorites, setFavorites] = useState(readFavorites);
+  const [fileScope, setFileScope] = useState("all");
+  const [viewMode, setViewMode] = useState("grid");
+  const [actionTarget, setActionTarget] = useState(null);
+  const [detailsTarget, setDetailsTarget] = useState(null);
+  const [details, setDetails] = useState(null);
+  const [transferTarget, setTransferTarget] = useState(null);
+  const [toasts, setToasts] = useState([]);
+  const [uploadQueue, setUploadQueue] = useState([]);
 
   const crumbs = useMemo(() => breadcrumbSegments(directory.currentPath), [directory.currentPath]);
-  const visibleDirectoryItems = useMemo(
-    () => sortItems(directory.items.filter((item) => matchesQuery(item, fileQuery)), fileSort),
-    [directory.items, fileQuery, fileSort]
-  );
+  const visibleDirectoryItems = useMemo(() => {
+    const scoped = fileScope === "favorites"
+      ? directory.items.filter((item) => favorites.includes(item.path))
+      : fileScope === "recent"
+        ? [...directory.items].sort((a, b) => new Date(b.modifiedAt || 0) - new Date(a.modifiedAt || 0)).slice(0, 20)
+        : directory.items;
+    return sortItems(scoped.filter((item) => matchesQuery(item, fileQuery)), fileSort);
+  }, [directory.items, favorites, fileQuery, fileScope, fileSort]);
   const galleryItems = useMemo(
     () =>
       sortItems(
@@ -274,9 +301,9 @@ export default function DashboardPage() {
       ),
     [gallery.items, galleryFilter, galleryQuery, gallerySort]
   );
-  const galleryVideos = useMemo(() => galleryItems.filter(isVideoItem), [galleryItems]);
-  const previewVideoIndex = previewTarget && isVideoItem(previewTarget)
-    ? galleryVideos.findIndex((item) => item.path === previewTarget.path)
+  const galleryMedia = useMemo(() => galleryItems.filter((item) => isVideoItem(item) || isImageItem(item)), [galleryItems]);
+  const previewMediaIndex = previewTarget && (isVideoItem(previewTarget) || isImageItem(previewTarget))
+    ? galleryMedia.findIndex((item) => item.path === previewTarget.path)
     : -1;
   const uploadElapsedSeconds = uploadStartedAt ? (Date.now() - uploadStartedAt) / 1000 : 0;
   const uploadSpeed = uploadElapsedSeconds > 0 ? uploadLoadedBytes / uploadElapsedSeconds : 0;
@@ -423,6 +450,19 @@ export default function DashboardPage() {
   }, [message]);
 
   useEffect(() => {
+    window.localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
+  }, [favorites]);
+
+  useEffect(() => {
+    const text = error || message;
+    if (!text) return;
+    const toast = { id: crypto.randomUUID(), type: error ? "error" : "success", message: text };
+    setToasts((current) => [...current.slice(-2), toast]);
+    const timer = window.setTimeout(() => setToasts((current) => current.filter((item) => item.id !== toast.id)), 4000);
+    return () => window.clearTimeout(timer);
+  }, [error, message]);
+
+  useEffect(() => {
     if (!uploading) {
       return undefined;
     }
@@ -472,6 +512,7 @@ export default function DashboardPage() {
     setUploadTotalBytes(files.reduce((sum, file) => sum + Number(file.size || 0), 0));
     setUploadStartedAt(Date.now());
     setUploadFileCount(files.length);
+    setUploadQueue(files.map((file) => ({ name: file.name, size: file.size, progress: 0, status: "queued" })));
     setUploadFileName(files.length > 1 ? `${files.length} files selected` : files[0].name);
     setUploadPhase("Uploading");
     setRestoredUpload(null);
@@ -491,6 +532,18 @@ export default function DashboardPage() {
           setUploadProgress(Math.round(progress * 100));
           setUploadLoadedBytes(Number(loaded || 0));
           setUploadTotalBytes(Number(total || 0));
+          setUploadQueue((current) => {
+            let remaining = Number(loaded || 0);
+            return current.map((entry) => {
+              const completed = Math.min(entry.size, Math.max(0, remaining));
+              remaining -= entry.size;
+              return {
+                ...entry,
+                progress: entry.size > 0 ? Math.round((completed / entry.size) * 100) : 100,
+                status: completed >= entry.size ? "completed" : completed > 0 ? "uploading" : "queued",
+              };
+            });
+          });
           if (fileName) {
             setUploadFileName(
               files.length > 1
@@ -569,6 +622,7 @@ export default function DashboardPage() {
         setUploadFileName("");
         setUploadPhase("");
         setUploadFileCount(0);
+        setUploadQueue([]);
         uploadCompletionRef.current = false;
         clearUploadSession();
         if (inputElement) {
@@ -694,6 +748,43 @@ export default function DashboardPage() {
 
   function handleDelete(item) {
     setDeleteTarget({ kind: "single", items: [item] });
+  }
+
+  function toggleFavorite(item) {
+    setFavorites((current) => current.includes(item.path) ? current.filter((path) => path !== item.path) : [...current, item.path]);
+    setActionTarget(null);
+  }
+
+  async function showDetails(item) {
+    setActionTarget(null);
+    setDetailsTarget(item);
+    setDetails(null);
+    try {
+      setDetails(await request(`/items?path=${encodeURIComponent(item.path)}`));
+    } catch (requestError) {
+      setError(requestError.message || "Unable to load file details");
+    }
+  }
+
+  async function handleTransfer(payload) {
+    setBusy(true);
+    try {
+      await request("/transfer", {
+        method: "POST",
+        body: {
+          ...payload,
+          path: transferTarget.path,
+          sourceRootId: storage?.roots?.activeRootId,
+        },
+      });
+      setTransferTarget(null);
+      setMessage(`Item ${payload.operation === "move" ? "moved" : "copied"}`);
+      await loadData(directory.currentPath === "/" ? "" : directory.currentPath.replace(/^\/+/, ""));
+    } catch (requestError) {
+      setError(requestError.message || "Unable to transfer item");
+    } finally {
+      setBusy(false);
+    }
   }
 
   function handleBulkDelete() {
@@ -861,6 +952,16 @@ export default function DashboardPage() {
             <p className="upload-panel__copy upload-panel__copy--metrics">
               {`${formatBytes(uploadLoadedBytes)} of ${formatBytes(uploadTotalBytes)} · ${formatBytes(uploadSpeed)}/s · ETA ${formatDuration(uploadEta)}`}
             </p>
+            {uploadQueue.length > 1 ? (
+              <div className="upload-queue">
+                {uploadQueue.map((entry) => (
+                  <div className="upload-queue__item" key={`${entry.name}-${entry.size}`}>
+                    <span>{entry.name}</span>
+                    <strong>{entry.progress}%</strong>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </section>
         ) : restoredUpload ? (
           <section className="upload-panel" aria-live="polite">
@@ -1002,6 +1103,14 @@ export default function DashboardPage() {
               <option value="largest">Largest</option>
               <option value="type">Type</option>
             </select>
+            <select className="text-input control-select" value={fileScope} onChange={(event) => setFileScope(event.target.value)}>
+              <option value="all">All files</option>
+              <option value="recent">Recent</option>
+              <option value="favorites">Favorites</option>
+            </select>
+            <button className="toggle-button" type="button" onClick={() => setViewMode((current) => current === "grid" ? "list" : "grid")}>
+              {viewMode === "grid" ? "List view" : "Grid view"}
+            </button>
             <button
               className={`toggle-button ${selectionMode ? "toggle-button--active" : ""}`}
               type="button"
@@ -1019,9 +1128,6 @@ export default function DashboardPage() {
             ) : null}
           </div>
 
-          {message ? <div className="success-banner">{message}</div> : null}
-          {error ? <div className="error-banner">{error}</div> : null}
-
           {loading ? (
             <div className="skeleton-list">
               <span />
@@ -1029,9 +1135,16 @@ export default function DashboardPage() {
               <span />
             </div>
           ) : visibleDirectoryItems.length === 0 ? (
-            <div className="empty-state">This folder is empty.</div>
+            <div className="empty-state empty-state--actions">
+              <strong>{fileScope === "favorites" ? "No favorites here." : "This folder is empty."}</strong>
+              <span>Upload files or create a folder to get started.</span>
+              <div>
+                <button className="primary-button" type="button" onClick={() => uploadRef.current?.click()}>Upload files</button>
+                <button className="secondary-button" type="button" onClick={() => setFolderModalOpen(true)}>New folder</button>
+              </div>
+            </div>
           ) : (
-            <div className={`file-table ${selectionMode ? "file-table--selecting" : ""}`}>
+            <div className={`file-table file-table--${viewMode} ${selectionMode ? "file-table--selecting" : ""}`}>
               <div className="file-table__head">
                 {selectionMode ? <span>Select</span> : null}
                 <span>Name</span>
@@ -1041,7 +1154,14 @@ export default function DashboardPage() {
                 <span>Actions</span>
               </div>
               {visibleDirectoryItems.map((item) => (
-                <article className={`file-row ${selectedPaths.includes(item.path) ? "file-row--selected" : ""}`} key={item.path}>
+                <article
+                  className={`file-row ${selectedPaths.includes(item.path) ? "file-row--selected" : ""}`}
+                  key={item.path}
+                  onContextMenu={(event) => {
+                    event.preventDefault();
+                    setActionTarget(item);
+                  }}
+                >
                   {selectionMode ? (
                     <label className="select-check">
                       <input
@@ -1067,6 +1187,7 @@ export default function DashboardPage() {
                   <RowActions
                     item={item}
                     onOpen={() => openItem(item)}
+                    onMore={() => setActionTarget(item)}
                     onRename={() => {
                       setRenameTarget(item);
                       setRenameValue(item.name);
@@ -1128,14 +1249,47 @@ export default function DashboardPage() {
         />
       ) : null}
 
+      {actionTarget ? (
+        <FileActionModal
+          item={actionTarget}
+          favorite={favorites.includes(actionTarget.path)}
+          onClose={() => setActionTarget(null)}
+          onPreview={() => { setActionTarget(null); openItem(actionTarget); }}
+          onDetails={() => showDetails(actionTarget)}
+          onFavorite={() => toggleFavorite(actionTarget)}
+          onRename={() => { setRenameTarget(actionTarget); setRenameValue(actionTarget.name); setActionTarget(null); }}
+          onTransfer={() => { setTransferTarget(actionTarget); setActionTarget(null); }}
+          onDelete={() => { handleDelete(actionTarget); setActionTarget(null); }}
+        />
+      ) : null}
+
+      {detailsTarget ? (
+        <FileDetailsModal item={detailsTarget} details={details} onClose={() => setDetailsTarget(null)} />
+      ) : null}
+
+      {transferTarget ? (
+        <TransferModal
+          item={transferTarget}
+          roots={storage?.roots}
+          busy={busy}
+          onClose={() => setTransferTarget(null)}
+          onConfirm={handleTransfer}
+        />
+      ) : null}
+
+      <ToastStack
+        toasts={toasts}
+        onDismiss={(id) => setToasts((current) => current.filter((toast) => toast.id !== id))}
+      />
+
       {previewTarget ? (
         <FilePreviewModal
           item={previewTarget}
           onClose={() => setPreviewTarget(null)}
-          hasPrevious={previewVideoIndex > 0}
-          hasNext={previewVideoIndex >= 0 && previewVideoIndex < galleryVideos.length - 1}
-          onPrevious={() => setPreviewTarget(galleryVideos[previewVideoIndex - 1])}
-          onNext={() => setPreviewTarget(galleryVideos[previewVideoIndex + 1])}
+          hasPrevious={previewMediaIndex > 0}
+          hasNext={previewMediaIndex >= 0 && previewMediaIndex < galleryMedia.length - 1}
+          onPrevious={() => setPreviewTarget(galleryMedia[previewMediaIndex - 1])}
+          onNext={() => setPreviewTarget(galleryMedia[previewMediaIndex + 1])}
         />
       ) : null}
     </div>

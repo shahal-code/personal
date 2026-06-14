@@ -22,7 +22,7 @@ import {
 import { joinRelativePath, resolveStoragePath, ensureSafeName } from "../lib/path.js";
 import { getHlsPlaylist, readHlsStatus, rewriteHlsPlaylist, shouldGenerateHls, startHlsTranscode, getHlsSegmentPath } from "../lib/hls.js";
 import { parseJsonBody, parseRelativePath } from "../utils/validation.js";
-import { getActiveStorageRoot } from "../lib/storage-roots.js";
+import { getActiveStorageRoot, getStorageRootById } from "../lib/storage-roots.js";
 
 const router = Router();
 const upload = multer({ dest: TEMP_DIR, limits: { fileSize: 1024 * 1024 * 1024 * 10 } });
@@ -277,6 +277,7 @@ router.use(
     "/preview",
     "/delete",
     "/items",
+    "/transfer",
   ],
   requireAdmin,
   noStore
@@ -898,6 +899,50 @@ router.delete("/delete", async (req, res) => {
   }
   await removeEntry(STORAGE_ROOT, targetPath);
   return res.json({ message: "Item deleted" });
+});
+
+router.post("/transfer", async (req, res) => {
+  const body = parseJsonBody(req);
+  const sourceRoot = await getStorageRootById(body.sourceRootId);
+  const destinationRoot = await getStorageRootById(body.destinationRootId);
+  const sourceRelative = parseRelativePath(body.path || "");
+  const destinationFolder = parseRelativePath(body.destinationPath || "");
+  const operation = body.operation === "move" ? "move" : "copy";
+
+  if (!sourceRelative) {
+    return res.status(400).json({ message: "Source path is required" });
+  }
+
+  const sourceAbsolute = resolveStoragePath(sourceRoot, sourceRelative).absolutePath;
+  const destinationRelative = joinRelativePath(destinationFolder, path.basename(sourceRelative));
+  const destinationAbsolute = resolveStoragePath(destinationRoot, destinationRelative).absolutePath;
+
+  if (sourceAbsolute === destinationAbsolute) {
+    return res.status(400).json({ message: "Source and destination are the same" });
+  }
+
+  if (await fs.stat(destinationAbsolute).catch(() => null)) {
+    return res.status(409).json({ message: "An item with this name already exists at the destination" });
+  }
+
+  const sourceStats = await fs.stat(sourceAbsolute);
+  await fs.mkdir(path.dirname(destinationAbsolute), { recursive: true });
+
+  if (sourceStats.isDirectory()) {
+    await fs.cp(sourceAbsolute, destinationAbsolute, { recursive: true, errorOnExist: true });
+  } else {
+    await fs.copyFile(sourceAbsolute, destinationAbsolute, fsSync.constants.COPYFILE_EXCL);
+  }
+
+  if (operation === "move") {
+    await fs.rm(sourceAbsolute, { recursive: sourceStats.isDirectory(), force: false });
+  }
+
+  return res.status(201).json({
+    message: `Item ${operation === "move" ? "moved" : "copied"}`,
+    path: destinationRelative,
+    destinationRootId: body.destinationRootId,
+  });
 });
 
 router.get("/items", async (req, res) => {

@@ -35,6 +35,7 @@ export default function FilePreviewModal({ item, onClose, onPrevious, onNext, ha
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
   const activeVideoUrlRef = useRef("");
+  const touchStartXRef = useRef(null);
   const [loading, setLoading] = useState(kind === "text");
   const [error, setError] = useState("");
   const [text, setText] = useState("");
@@ -329,7 +330,17 @@ export default function FilePreviewModal({ item, onClose, onPrevious, onNext, ha
           </div>
         </div>
 
-        <div className="preview-frame">
+        <div
+          className="preview-frame"
+          onTouchStart={(event) => { touchStartXRef.current = event.touches[0]?.clientX ?? null; }}
+          onTouchEnd={(event) => {
+            if (touchStartXRef.current == null) return;
+            const distance = (event.changedTouches[0]?.clientX ?? touchStartXRef.current) - touchStartXRef.current;
+            touchStartXRef.current = null;
+            if (distance > 60 && hasPrevious) onPrevious?.();
+            if (distance < -60 && hasNext) onNext?.();
+          }}
+        >
           {loading ? (
             <div className="empty-state">Loading preview...</div>
           ) : error ? (
@@ -371,7 +382,11 @@ export default function FilePreviewModal({ item, onClose, onPrevious, onNext, ha
           ) : kind === "audio" ? (
             <audio className="preview-media preview-media--audio" controls autoPlay src={previewUrl} crossOrigin="use-credentials" />
           ) : kind === "image" ? (
-            <img className="preview-image" src={previewUrl} alt={item.name} crossOrigin="use-credentials" />
+            <>
+              <button className="preview-nav preview-nav--previous" type="button" onClick={onPrevious} disabled={!hasPrevious} aria-label="Previous media">&#8249;</button>
+              <img className="preview-image" src={previewUrl} alt={item.name} crossOrigin="use-credentials" />
+              <button className="preview-nav preview-nav--next" type="button" onClick={onNext} disabled={!hasNext} aria-label="Next media">&#8250;</button>
+            </>
           ) : kind === "pdf" ? (
             <iframe className="preview-embed" title={item.name} src={previewUrl} />
           ) : kind === "text" ? (
