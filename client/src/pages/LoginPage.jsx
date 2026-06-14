@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext.jsx";
-import AccessModeButtons from "../components/AccessModeButtons.jsx";
 
 export default function LoginPage() {
   const { signIn } = useAuth();
@@ -31,7 +30,6 @@ export default function LoginPage() {
       <form className="auth-card" onSubmit={handleSubmit}>
         <p className="eyebrow">Admin Login</p>
         <h2>Enter credentials</h2>
-        <AccessModeButtons />
         <label className="field">
           <span>Email</span>
           <input
