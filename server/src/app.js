@@ -9,7 +9,7 @@ import fileRoutes from "./routes/files.js";
 import systemRoutes from "./routes/system.js";
 import storageRoutes from "./routes/storage.js";
 import securityActivityRoutes from "./routes/security-activity.js";
-import { CLIENT_ORIGINS, DATA_DIR, STORAGE_ROOT } from "./config/env.js";
+import { AWS_REGION, CLIENT_ORIGINS, DATA_DIR, S3_BUCKET, STORAGE_DRIVER, STORAGE_ROOT } from "./config/env.js";
 import { assertRequiredEnv } from "./config/env.js";
 import { notFoundHandler, errorHandler } from "./middleware/error.js";
 import { requireAdminPage } from "./middleware/auth.js";
@@ -31,6 +31,14 @@ export async function createApp() {
   const app = express();
   app.set("trust proxy", 1);
   app.disable("x-powered-by");
+  const connectSources = ["'self'", ...CLIENT_ORIGINS];
+  if (STORAGE_DRIVER === "s3" && S3_BUCKET && AWS_REGION) {
+    connectSources.push(
+      `https://${S3_BUCKET}.s3.${AWS_REGION}.amazonaws.com`,
+      `https://${S3_BUCKET}.s3.amazonaws.com`,
+      "https://*.s3.amazonaws.com"
+    );
+  }
 
   app.use(
     helmet({
@@ -42,7 +50,7 @@ export async function createApp() {
           "frame-ancestors": ["'none'"],
           "img-src": ["'self'", "data:", "blob:"],
           "media-src": ["'self'", "blob:"],
-          "connect-src": ["'self'", ...CLIENT_ORIGINS],
+          "connect-src": connectSources,
           "script-src": ["'self'"],
           "style-src": ["'self'", "'unsafe-inline'"],
         },
