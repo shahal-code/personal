@@ -45,6 +45,7 @@ export default function FilePreviewModal({ item, onClose, onPrevious, onNext, ha
   const [videoError, setVideoError] = useState(false);
   const previewUrl = localPreviewUrl || resolveUrl(`/preview?path=${encodeURIComponent(item.path)}`);
   const directVideoUrl = previewUrl;
+  const isLocalPreview = Boolean(localPreviewUrl);
   const hlsUrl = resolveUrl(`/preview/hls?path=${encodeURIComponent(item.path)}`);
   const supportsNativeHls = useMemo(() => {
     const video = document.createElement("video");
@@ -231,6 +232,7 @@ export default function FilePreviewModal({ item, onClose, onPrevious, onNext, ha
   // ✅ Timeout fallback — if video not loading after 5 seconds, force direct stream
   useEffect(() => {
     if (kind !== "video") return undefined;
+    if (isLocalPreview) return undefined;
 
     const timer = window.setTimeout(() => {
       const video = videoRef.current;
@@ -249,7 +251,7 @@ export default function FilePreviewModal({ item, onClose, onPrevious, onNext, ha
     }, 5000);
 
     return () => window.clearTimeout(timer);
-  }, [directVideoUrl, kind]);
+  }, [directVideoUrl, isLocalPreview, kind]);
 
   useEffect(
     () => () => {
@@ -283,6 +285,11 @@ export default function FilePreviewModal({ item, onClose, onPrevious, onNext, ha
 
   function handleVideoError(e) {
     const video = e.currentTarget;
+    if (isLocalPreview) {
+      setError("This browser cannot play this local video format while uploading. The upload is still running.");
+      return;
+    }
+
     // If already on direct stream and still failing, show error
     if (activeVideoUrlRef.current === directVideoUrl) {
       setError("Unable to play this video");
