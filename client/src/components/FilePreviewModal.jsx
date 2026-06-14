@@ -47,7 +47,8 @@ export default function FilePreviewModal({ item, onClose, onPrevious, onNext, ha
   const [signedPreviewUrl, setSignedPreviewUrl] = useState("");
   const [previewUrlLoading, setPreviewUrlLoading] = useState(false);
   const shouldUseSignedPreview = !localPreviewUrl && ["video", "audio", "image"].includes(kind);
-  const previewUrl = localPreviewUrl || signedPreviewUrl || (shouldUseSignedPreview && previewUrlLoading ? "" : fallbackPreviewUrl);
+  const previewUrlBase = localPreviewUrl || signedPreviewUrl || (shouldUseSignedPreview && previewUrlLoading ? "" : fallbackPreviewUrl);
+  const previewUrl = previewUrlBase && kind === "video" && !previewUrlBase.includes("#") ? `${previewUrlBase}#t=0.001` : previewUrlBase;
   const directVideoUrl = previewUrl;
   const isLocalPreview = Boolean(localPreviewUrl);
   const hlsUrl = resolveUrl(`/preview/hls?path=${encodeURIComponent(item.path)}`);
@@ -401,9 +402,9 @@ export default function FilePreviewModal({ item, onClose, onPrevious, onNext, ha
                 ref={videoRef}
                 className="preview-media"
                 controls
-                autoPlay
+                autoPlay={isLocalPreview}
                 playsInline
-                muted={false}
+                muted={isLocalPreview}
                 preload="auto"
                 onError={handleVideoError}
                 onStalled={handleVideoStalled}
